@@ -31,7 +31,7 @@
 
 static VkResult vkDevExtError(VkDevice dev) {
     struct loader_device *found_dev;
-    struct loader_icd *icd = loader_get_icd_and_device(dev, &found_dev);
+    struct loader_icd *icd = loader_get_icd_and_device(dev, &found_dev, NULL);
 
     if (icd)
         loader_log(icd->this_instance, VK_DEBUG_REPORT_ERROR_BIT_EXT, 0,
@@ -45,7 +45,7 @@ loader_init_device_dispatch_table(struct loader_dev_dispatch_table *dev_table,
                                   PFN_vkGetDeviceProcAddr gpa, VkDevice dev) {
     VkLayerDispatchTable *table = &dev_table->core_dispatch;
     for (uint32_t i = 0; i < MAX_NUM_DEV_EXTS; i++)
-        dev_table->ext_dispatch.DevExt[i] = (PFN_vkDevExt)vkDevExtError;
+        dev_table->ext_dispatch.dev_ext[i] = (PFN_vkDevExt)vkDevExtError;
 
     table->GetDeviceProcAddr =
         (PFN_vkGetDeviceProcAddr)gpa(dev, "vkGetDeviceProcAddr");
@@ -267,6 +267,27 @@ static inline void loader_init_device_extension_dispatch_table(
         (PFN_vkGetSwapchainImagesKHR)gpa(dev, "vkGetSwapchainImagesKHR");
     table->QueuePresentKHR =
         (PFN_vkQueuePresentKHR)gpa(dev, "vkQueuePresentKHR");
+    table->CmdDrawIndirectCountAMD =
+        (PFN_vkCmdDrawIndirectCountAMD)gpa(dev, "vkCmdDrawIndirectCountAMD");
+    table->CmdDrawIndexedIndirectCountAMD =
+        (PFN_vkCmdDrawIndexedIndirectCountAMD)gpa(
+            dev, "vkCmdDrawIndexedIndirectCountAMD");
+#ifdef VK_USE_PLATFORM_WIN32_KHR
+    table->GetMemoryWin32HandleNV =
+        (PFN_vkGetMemoryWin32HandleNV)gpa(dev, "vkGetMemoryWin32HandleNV");
+#endif // VK_USE_PLATFORM_WIN32_KHR
+    table->CreateSharedSwapchainsKHR =
+        (PFN_vkCreateSharedSwapchainsKHR)gpa(dev, "vkCreateSharedSwapchainsKHR");
+    table->DebugMarkerSetObjectTagEXT =
+        (PFN_vkDebugMarkerSetObjectTagEXT)gpa(dev, "vkDebugMarkerSetObjectTagEXT");
+    table->DebugMarkerSetObjectNameEXT =
+        (PFN_vkDebugMarkerSetObjectNameEXT)gpa(dev, "vkDebugMarkerSetObjectNameEXT");
+    table->CmdDebugMarkerBeginEXT =
+        (PFN_vkCmdDebugMarkerBeginEXT)gpa(dev, "vkCmdDebugMarkerBeginEXT");
+    table->CmdDebugMarkerEndEXT =
+        (PFN_vkCmdDebugMarkerEndEXT)gpa(dev, "vkCmdDebugMarkerEndEXT");
+    table->CmdDebugMarkerInsertEXT =
+        (PFN_vkCmdDebugMarkerInsertEXT)gpa(dev, "vkCmdDebugMarkerInsertEXT");
 }
 
 static inline void *
@@ -519,6 +540,20 @@ loader_lookup_device_dispatch_table(const VkLayerDispatchTable *table,
     if (!strcmp(name, "CmdExecuteCommands"))
         return (void *)table->CmdExecuteCommands;
 
+    if (!strcmp(name, "CreateSwapchainKHR")) {
+        // For CreateSwapChainKHR we need to use trampoline and terminator
+        // functions to properly unwrap the SurfaceKHR object.
+        return (void *)vkCreateSwapchainKHR;
+    }
+    if (!strcmp(name, "DestroySwapchainKHR"))
+        return (void *)table->DestroySwapchainKHR;
+    if (!strcmp(name, "GetSwapchainImagesKHR"))
+        return (void *)table->GetSwapchainImagesKHR;
+    if (!strcmp(name, "AcquireNextImageKHR"))
+        return (void *)table->AcquireNextImageKHR;
+    if (!strcmp(name, "QueuePresentKHR"))
+        return (void *)table->QueuePresentKHR;
+
     return NULL;
 }
 
@@ -584,6 +619,9 @@ static inline void loader_init_instance_extension_dispatch_table(
     table->GetPhysicalDeviceSurfacePresentModesKHR =
         (PFN_vkGetPhysicalDeviceSurfacePresentModesKHR)gpa(
             inst, "vkGetPhysicalDeviceSurfacePresentModesKHR");
+    table->GetPhysicalDeviceExternalImageFormatPropertiesNV =
+        (PFN_vkGetPhysicalDeviceExternalImageFormatPropertiesNV)gpa(
+            inst, "vkGetPhysicalDeviceExternalImageFormatPropertiesNV");
 #ifdef VK_USE_PLATFORM_MIR_KHR
     table->CreateMirSurfaceKHR =
         (PFN_vkCreateMirSurfaceKHR)gpa(inst, "vkCreateMirSurfaceKHR");
@@ -684,6 +722,8 @@ loader_lookup_instance_dispatch_table(const VkLayerInstanceDispatchTable *table,
         return (void *)table->GetPhysicalDeviceSurfaceFormatsKHR;
     if (!strcmp(name, "GetPhysicalDeviceSurfacePresentModesKHR"))
         return (void *)table->GetPhysicalDeviceSurfacePresentModesKHR;
+    if (!strcmp(name, "GetPhysicalDeviceExternalImageFormatPropertiesNV"))
+        return (void *)table->GetPhysicalDeviceExternalImageFormatPropertiesNV;
 #ifdef VK_USE_PLATFORM_MIR_KHR
     if (!strcmp(name, "CreateMirSurfaceKHR"))
         return (void *)table->CreateMirSurfaceKHR;
