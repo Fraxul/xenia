@@ -113,8 +113,9 @@ struct StateData {
   vec4 window_scale;  // 0x0
   vec4 vtx_fmt;       // 0x10
   vec4 alpha_test;    // 0x20
-  uint ps_param_gen;  // 0x30
-  uint padding[3];    // 0x34
+  vec2 point_size;    // 0x30
+  uint ps_param_gen;  // 0x38
+  uint padding;       // 0x3c
   // TODO(benvanik): variable length.
   uvec2 texture_samplers[32];  // 0x40
   uint texture_swizzles[32];   // 0x140
@@ -128,6 +129,7 @@ layout(binding = 0) readonly buffer State {
 
 struct VertexData {
   vec4 o[16];
+  vec2 point_coord;
 };
 )");
 
@@ -239,6 +241,7 @@ void processVertex(const in StateData state);
 void main() {
   gl_Position = vec4(0.0, 0.0, 0.0, 1.0);
   gl_PointSize = 1.0;
+  vtx.point_coord = vec2(-1.0f);
   const StateData state = states[gl_DrawIDARB];
   processVertex(state);
   gl_Position = applyTransform(state, gl_Position);
@@ -350,7 +353,7 @@ void main() {
     }
     EmitSource("  if (state.ps_param_gen < 16) {\n");
     EmitSource(
-        "    vec4 ps_param_gen = vec4(gl_FragCoord.xy, gl_PointCoord.xy);\n");
+        "    vec4 ps_param_gen = vec4(gl_FragCoord.xy, vtx.point_coord.xy);\n");
     EmitSource("    ps_param_gen.x *= (gl_FrontFacing ? 1.0 : -1.0);\n");
 
     // This is insane, but r[ps_param_gen] causes nvidia to fully deopt?
@@ -920,19 +923,16 @@ void GlslShaderTranslator::EmitStoreVectorResult(
 
 void GlslShaderTranslator::EmitStoreScalarResult(
     const InstructionResult& result) {
+  if (result.storage_target == InstructionStorageTarget::kPointSize) {
+    EmitSourceDepth("vtx.point_coord = ps.xx;\n");
+    return;
+  }
   EmitStoreResult(result, "vec4(ps)");
 }
 
 void GlslShaderTranslator::EmitStoreResult(const InstructionResult& result,
                                            const char* temp) {
   if (!result.has_any_writes()) {
-    return;
-  }
-
-  // Special gl_pointSize discard
-  if (result.storage_target == InstructionStorageTarget::kPointSize &&
-      !result.is_standard_swizzle()) {
-    EmitUnimplementedTranslationError();
     return;
   }
 
@@ -950,7 +950,7 @@ void GlslShaderTranslator::EmitStoreResult(const InstructionResult& result,
       EmitSourceDepth("gl_Position");
       break;
     case InstructionStorageTarget::kPointSize:
-      EmitSourceDepth("gl_PointSize");
+      assert_always(); // handled in EmitStoreScalarResult
       break;
     case InstructionStorageTarget::kColorTarget:
       EmitSourceDepth("oC");

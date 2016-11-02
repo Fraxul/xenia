@@ -111,6 +111,7 @@ bool GL4CommandProcessor::SetupContext() {
       "#extension all : warn\n"
       "#extension GL_ARB_explicit_uniform_location : require\n"
       "#extension GL_ARB_shading_language_420pack : require\n"
+      "layout(std430, column_major) buffer;\n"
       "in gl_PerVertex {\n"
       "  vec4 gl_Position;\n"
       "  float gl_PointSize;\n"
@@ -123,12 +124,30 @@ bool GL4CommandProcessor::SetupContext() {
       "};\n"
       "struct VertexData {\n"
       "  vec4 o[16];\n"
+      "  vec2 point_coord;\n"
       "};\n"
       "\n"
+      "// This must match DrawBatcher::CommonHeader.\n"
+      "struct StateData {\n"
+      "  vec4 window_scale;  // 0x0\n"
+      "  vec4 vtx_fmt;       // 0x10\n"
+      "  vec4 alpha_test;    // 0x20\n"
+      "  vec2 point_size;    // 0x30\n"
+      "  uint ps_param_gen;  // 0x38\n"
+      "  uint padding;       // 0x3c\n"
+      "  // TODO(benvanik): variable length.\n"
+      "  uvec2 texture_samplers[32];  // 0x40\n"
+      "  uint texture_swizzles[32];   // 0x140\n"
+      "  vec4 float_consts[512];      // 0x1C0\n"
+      "  int bool_consts[8];          // 0x21C0\n"
+      "  int loop_consts[32];         // 0x2240\n"
+      "};\n"
+      "layout(binding = 0) readonly buffer State {\n"
+      "  StateData states[];\n"
+      "};\n"
+      "layout(location = 0) flat in uint draw_id[];\n"
       "layout(location = 1) in VertexData in_vtx[];\n"
       "layout(location = 1) out VertexData out_vtx;\n";
-  // TODO(benvanik): fetch default point size from register and use that if
-  //     the VS doesn't write oPointSize.
   // TODO(benvanik): clamp to min/max.
   // TODO(benvanik): figure out how to see which interpolator gets adjusted.
   std::string point_list_shader =
@@ -143,10 +162,16 @@ bool GL4CommandProcessor::SetupContext() {
       "    vec2( 1.0, -1.0),\n"
       "  };\n"
       "  vec4 pos = gl_in[0].gl_Position;\n"
-      "  float psize = gl_in[0].gl_PointSize;\n"
+      "  vec2 window_scaled_psize = (vec2(1.0f) / states[draw_id[0]].window_scale.zw); \n"
+      "  if (in_vtx[0].point_coord.x < 0.0f) {\n"
+      "    window_scaled_psize *= states[draw_id[0]].point_size;\n"
+      "  } else {\n"
+      "    window_scaled_psize *= in_vtx[0].point_coord.xy;\n"
+      "  }\n"
       "  for (int i = 0; i < 4; ++i) {\n"
-      "    gl_Position = vec4(pos.xy + offsets[i] * psize, pos.zw);\n"
+      "    gl_Position = vec4(pos.xy + (offsets[i] * window_scaled_psize), pos.zw);\n"
       "    out_vtx = in_vtx[0];\n"
+      "    out_vtx.point_coord = max(offsets[i], vec2(0.0f));\n"
       "    EmitVertex();\n"
       "  }\n"
       "  EndPrimitive();\n"
@@ -918,12 +943,6 @@ GL4CommandProcessor::UpdateStatus GL4CommandProcessor::UpdateViewportState() {
     draw_batcher_.set_window_scalar(1.0f / 2560.0f, -1.0f / 2560.0f);
   }
 
-  if (!dirty) {
-    return UpdateStatus::kCompatible;
-  }
-
-  draw_batcher_.Flush(DrawBatcher::FlushMode::kStateChange);
-
   // Clipping.
   // https://github.com/freedreno/amd-gpu/blob/master/include/reg/yamato/14/yamato_genenum.h#L1587
   // bool clip_enabled = ((regs.pa_cl_clip_cntl >> 17) & 0x1) == 0;
@@ -958,7 +977,6 @@ GL4CommandProcessor::UpdateStatus GL4CommandProcessor::UpdateViewportState() {
   GLsizei ws_h = ((regs.pa_sc_window_scissor_br >> 16) & 0x7FFF) - ws_y;
   ws_x += window_offset_x;
   ws_y += window_offset_y;
-  glScissorIndexed(0, ws_x, ws_y, ws_w, ws_h);
 
   // HACK: no clue where to get these values.
   // RB_SURFACE_INFO
@@ -991,34 +1009,44 @@ GL4CommandProcessor::UpdateStatus GL4CommandProcessor::UpdateViewportState() {
               vport_zscale_enable == vport_xoffset_enable ==
               vport_yoffset_enable == vport_zoffset_enable);
 
+
+  float texel_offset_x = 0.0f;
+  float texel_offset_y = 0.0f;
+  float vpw, vph, vpx, vpy;
+
   if (vport_xscale_enable) {
-    float texel_offset_x = 0.0f;
-    float texel_offset_y = 0.0f;
     float vox = vport_xoffset_enable ? regs.pa_cl_vport_xoffset : 0;
     float voy = vport_yoffset_enable ? regs.pa_cl_vport_yoffset : 0;
     float vsx = vport_xscale_enable ? regs.pa_cl_vport_xscale : 1;
     float vsy = vport_yscale_enable ? regs.pa_cl_vport_yscale : 1;
     window_width_scalar = window_height_scalar = 1;
-    float vpw = 2 * window_width_scalar * vsx;
-    float vph = -2 * window_height_scalar * vsy;
-    float vpx = window_width_scalar * vox - vpw / 2 + window_offset_x;
-    float vpy = window_height_scalar * voy - vph / 2 + window_offset_y;
-    glViewportIndexedf(0, vpx + texel_offset_x, vpy + texel_offset_y, vpw, vph);
+    vpw = 2 * window_width_scalar * vsx;
+    vph = -2 * window_height_scalar * vsy;
+    vpx = window_width_scalar * vox - vpw / 2 + window_offset_x;
+    vpy = window_height_scalar * voy - vph / 2 + window_offset_y;
 
     // TODO(benvanik): depth range adjustment?
     // float voz = vport_zoffset_enable ? regs.pa_cl_vport_zoffset : 0;
     // float vsz = vport_zscale_enable ? regs.pa_cl_vport_zscale : 1;
   } else {
-    float texel_offset_x = 0.0f;
-    float texel_offset_y = 0.0f;
-    float vpw = 2 * 2560.0f * window_width_scalar;
-    float vph = 2 * 2560.0f * window_height_scalar;
-    float vpx = -2560.0f * window_width_scalar + window_offset_x;
-    float vpy = -2560.0f * window_height_scalar + window_offset_y;
-    glViewportIndexedf(0, vpx + texel_offset_x, vpy + texel_offset_y, vpw, vph);
+    vpw = 2 * 2560.0f * window_width_scalar;
+    vph = 2 * 2560.0f * window_height_scalar;
+    vpx = -2560.0f * window_width_scalar + window_offset_x;
+    vpy = -2560.0f * window_height_scalar + window_offset_y;
   }
   float voz = vport_zoffset_enable ? regs.pa_cl_vport_zoffset : 0;
   float vsz = vport_zscale_enable ? regs.pa_cl_vport_zscale : 1;
+
+  draw_batcher_.set_viewport_size(vpw, vph);
+
+  if (!dirty) {
+    return UpdateStatus::kCompatible;
+  }
+
+  draw_batcher_.Flush(DrawBatcher::FlushMode::kStateChange);
+
+  glScissorIndexed(0, ws_x, ws_y, ws_w, ws_h);
+  glViewportIndexedf(0, vpx + texel_offset_x, vpy + texel_offset_y, vpw, vph);
   glDepthRangef(voz, voz + vsz);
 
   return UpdateStatus::kMismatch;
@@ -1038,7 +1066,13 @@ GL4CommandProcessor::UpdateStatus GL4CommandProcessor::UpdateRasterizerState(
   dirty |= SetShadowRegister(&regs.multi_prim_ib_reset_index,
                              XE_GPU_REG_VGT_MULTI_PRIM_IB_RESET_INDX);
   dirty |= SetShadowRegister(&regs.pa_sc_viz_query, XE_GPU_REG_PA_SC_VIZ_QUERY);
+  dirty |= SetShadowRegister(&regs.pa_su_point_size, XE_GPU_REG_PA_SU_POINT_SIZE);
   dirty |= regs.prim_type != prim_type;
+
+  draw_batcher_.set_point_size(
+    static_cast<float>((regs.pa_su_point_size & 0xffff0000) >> 16) / 8.0f,
+    static_cast<float>((regs.pa_su_point_size & 0x0000ffff)) / 8.0f);
+
   if (!dirty) {
     return UpdateStatus::kCompatible;
   }
@@ -1095,6 +1129,11 @@ GL4CommandProcessor::UpdateStatus GL4CommandProcessor::UpdateRasterizerState(
 
   if (prim_type == PrimitiveType::kRectangleList) {
     // Rectangle lists aren't culled. There may be other things they skip too.
+    glDisable(GL_CULL_FACE);
+  }
+
+  if (prim_type == PrimitiveType::kPointList) {
+    // Face culling doesn't apply to point primitives.
     glDisable(GL_CULL_FACE);
   }
 

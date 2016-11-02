@@ -64,6 +64,12 @@ class DrawBatcher {
     active_draw_.header->window_scale.x = width_scalar;
     active_draw_.header->window_scale.y = height_scalar;
   }
+
+  void set_viewport_size(float viewport_width, float viewport_height) {
+    active_draw_.header->window_scale.z = viewport_width;
+    active_draw_.header->window_scale.w = viewport_height;
+  }
+
   void set_vtx_fmt(float xy, float z, float w) {
     active_draw_.header->vtx_fmt.x = xy;
     active_draw_.header->vtx_fmt.y = xy;
@@ -77,6 +83,10 @@ class DrawBatcher {
   }
   void set_ps_param_gen(int register_index) {
     active_draw_.header->ps_param_gen = register_index;
+  }
+  void set_point_size(float psx, float psy) {
+    active_draw_.header->point_size_x = psx;
+    active_draw_.header->point_size_y = psy;
   }
   void set_texture_sampler(int index, GLuint64 handle, uint32_t swizzle) {
     active_draw_.header->texture_samplers[index] = handle;
@@ -158,8 +168,10 @@ class DrawBatcher {
     float4 window_scale;  // sx,sy, ?, ?
     float4 vtx_fmt;       //
     float4 alpha_test;    // alpha test enable, func, ref, ?
+    float point_size_x;
+    float point_size_y;
     int ps_param_gen;
-    int padding[3];
+    int padding;
 
     // TODO(benvanik): pack tightly
     GLuint64 texture_samplers[32];
