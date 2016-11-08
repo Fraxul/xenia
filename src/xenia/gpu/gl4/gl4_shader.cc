@@ -35,10 +35,14 @@ bool GL4Shader::Prepare() {
   bool success = true;
   if (!CompileShader()) {
     host_error_log_ = GetShaderInfoLog();
+    auto source_str = GetTranslatedBinaryString();
+    XELOGE("GL4Shader::Prepare failed. Log:\n%s\n----\nShader:\n%s", host_error_log_.c_str(), source_str.c_str());
     success = false;
   }
   if (success && !LinkProgram()) {
     host_error_log_ = GetProgramInfoLog();
+    auto source_str = GetTranslatedBinaryString();
+    XELOGE("GL4Shader::Prepare failed. Log:\n%s\n----\nShader:\n%s", host_error_log_.c_str(), source_str.c_str());
     success = false;
   }
 
@@ -84,7 +88,7 @@ bool GL4Shader::LoadFromBinary(const uint8_t* blob, GLenum binary_format,
 
 bool GL4Shader::PrepareVertexArrayObject() {
   glCreateVertexArrays(1, &vao_);
-
+#if 0
   for (const auto& vertex_binding : vertex_bindings()) {
     for (const auto& attrib : vertex_binding.attributes) {
       auto comp_count = GetVertexFormatComponentCount(
@@ -154,7 +158,7 @@ bool GL4Shader::PrepareVertexArrayObject() {
                                 attrib.fetch_instr.attributes.offset * 4);
     }
   }
-
+#endif
   return true;
 }
 

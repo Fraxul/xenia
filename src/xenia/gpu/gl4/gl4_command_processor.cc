@@ -1455,21 +1455,29 @@ GL4CommandProcessor::UpdateStatus GL4CommandProcessor::PopulateVertexBuffers() {
 
       // TODO(benvanik): if we could find a way to avoid this, we could use
       // multidraw without flushing.
+#if 0
       glVertexArrayVertexBuffer(
           vertex_shader->vao(),
           static_cast<GLuint>(vertex_binding.binding_index),
           scratch_buffer_.handle(), allocation.offset,
           vertex_binding.stride_words * 4);
+#else
+      glBindBufferRange(GL_SHADER_STORAGE_BUFFER, vertex_binding.binding_index + xe::gpu::GlslShaderTranslator::kFetchConstantBindingOffset, scratch_buffer_.handle(), allocation.offset, valid_range);
+#endif
 
       scratch_buffer_.Commit(std::move(allocation));
     } else {
       // TODO(benvanik): if we could find a way to avoid this, we could use
       // multidraw without flushing.
+#if 0
       glVertexArrayVertexBuffer(
           vertex_shader->vao(),
           static_cast<GLuint>(vertex_binding.binding_index),
           scratch_buffer_.handle(), allocation.offset,
           vertex_binding.stride_words * 4);
+#else
+      glBindBufferRange(GL_SHADER_STORAGE_BUFFER, vertex_binding.binding_index + xe::gpu::GlslShaderTranslator::kFetchConstantBindingOffset, scratch_buffer_.handle(), allocation.offset, valid_range);
+#endif
     }
   }
 

@@ -10,6 +10,7 @@
 #include "xenia/gpu/glsl_shader_translator.h"
 
 #include <unordered_set>
+#include <map>
 
 namespace xe {
 namespace gpu {
@@ -51,6 +52,64 @@ const char* GetVertexFormatTypeName(VertexFormat format, bool is_signed) {
     default:
       assert_always();
       return "vec4";
+  }
+}
+
+const char* GetVertexFormatBaseTypeName(VertexFormat format, bool is_signed) {
+  switch (format) {
+    case VertexFormat::k_32_FLOAT:
+    case VertexFormat::k_32_32_FLOAT:
+    case VertexFormat::k_32_32_32_FLOAT:
+    case VertexFormat::k_32_32_32_32_FLOAT:
+      return "float";
+
+    case VertexFormat::k_32:
+    case VertexFormat::k_16_16:
+    case VertexFormat::k_32_32:
+    case VertexFormat::k_10_11_11:
+    case VertexFormat::k_2_10_10_10:
+    case VertexFormat::k_11_11_10:
+    case VertexFormat::k_8_8_8_8:
+    case VertexFormat::k_16_16_16_16:
+    case VertexFormat::k_32_32_32_32:
+    case VertexFormat::k_16_16_16_16_FLOAT:
+    case VertexFormat::k_16_16_FLOAT:
+      return "uint";
+
+    default:
+      assert_always();
+      return "vec4";
+  }
+}
+
+size_t GetVertexFormatBaseElementCount(VertexFormat format) {
+  switch (format) {
+    case VertexFormat::k_32_FLOAT:
+    case VertexFormat::k_32:
+    case VertexFormat::k_16_16:
+    case VertexFormat::k_10_11_11:
+    case VertexFormat::k_2_10_10_10:
+    case VertexFormat::k_11_11_10:
+    case VertexFormat::k_8_8_8_8:
+      return 1;
+
+    case VertexFormat::k_32_32:
+    case VertexFormat::k_32_32_FLOAT:
+    case VertexFormat::k_16_16_16_16:
+    case VertexFormat::k_16_16_16_16_FLOAT:
+    case VertexFormat::k_16_16_FLOAT:
+      return 2;
+
+    case VertexFormat::k_32_32_32_FLOAT:
+      return 3;
+
+    case VertexFormat::k_32_32_32_32_FLOAT:
+    case VertexFormat::k_32_32_32_32:
+      return 4;
+
+    default:
+      assert_always();
+      return 0;
   }
 }
 
@@ -194,6 +253,21 @@ out gl_PerVertex {
 layout(location = 0) flat out uint draw_id;
 layout(location = 1) out VertexData vtx;
 
+vec3 get_11_11_10_u(const uint data_in) {
+  vec3 vec;
+  vec.x = bitfieldExtract(data_in, 21, 11);
+  vec.y = bitfieldExtract(data_in, 10, 11);
+  vec.z = bitfieldExtract(data_in,  0, 10);
+  return vec;
+}
+vec3 get_11_11_10_s(const int data_in) {
+  vec3 vec;
+  vec.x = bitfieldExtract(data_in, 21, 11);
+  vec.y = bitfieldExtract(data_in, 10, 11);
+  vec.z = bitfieldExtract(data_in,  0, 10);
+  return vec;
+}
+
 vec3 get_10_11_11_u(const uint data_in) {
   vec3 vec;
   vec.x = bitfieldExtract(data_in, 22, 10);
@@ -224,6 +298,34 @@ vec4 get_2_10_10_10_s(const int data_in) {
   vec.z = bitfieldExtract(data_in,  0, 10);
   vec.w = bitfieldExtract(data_in, 30,  2);
   return vec;
+}
+vec2 get_16_16_u(const uint data_in) {
+  vec2 res;
+  res.x = bitfieldExtract(data_in, 0, 16);
+  res.y = bitfieldExtract(data_in, 16, 16);
+  return res;
+}
+vec2 get_16_16_s(const int data_in) {
+  vec2 res;
+  res.x = bitfieldExtract(data_in, 0, 16);
+  res.y = bitfieldExtract(data_in, 16, 16);
+  return res;
+}
+vec4 get_8x4_u(const uint data_in) {
+  vec4 res;
+  res.x = bitfieldExtract(data_in, 0, 8);
+  res.y = bitfieldExtract(data_in, 8, 8);
+  res.z = bitfieldExtract(data_in, 16, 8);
+  res.w = bitfieldExtract(data_in, 24, 8);
+  return res;
+}
+vec4 get_8x4_s(const int data_in) {
+  vec4 res;
+  res.x = bitfieldExtract(data_in, 0, 8);
+  res.y = bitfieldExtract(data_in, 8, 8);
+  res.z = bitfieldExtract(data_in, 16, 8);
+  res.w = bitfieldExtract(data_in, 24, 8);
+  return res;
 }
 
 vec4 applyTransform(const in StateData state, vec4 pos) {
@@ -295,6 +397,10 @@ void main() {
   if (is_vertex_shader()) {
     std::unordered_set<uint64_t> defined_locations;
     for (auto& binding : vertex_bindings()) {
+      EmitSource("struct VertexBinding_%u_t {\n", binding.fetch_constant);
+
+      // Sort attributes for this vertex binding by offset
+      std::map<size_t, const Shader::VertexBinding::Attribute*> attributes_by_offset;
       for (auto& attrib : binding.attributes) {
         uint64_t key = (static_cast<uint64_t>(binding.fetch_constant) << 32) |
                        attrib.fetch_instr.attributes.offset;
@@ -303,13 +409,29 @@ void main() {
           continue;
         }
         defined_locations.insert(key);
-        const char* type_name =
-            GetVertexFormatTypeName(attrib.fetch_instr.attributes.data_format,
-                                    attrib.fetch_instr.attributes.is_signed);
-        EmitSource("layout(location = %d) in %s vf%u_%d;\n",
-                   attrib.attrib_index, type_name, binding.fetch_constant,
-                   attrib.fetch_instr.attributes.offset);
+        attributes_by_offset.insert(std::make_pair(attrib.fetch_instr.attributes.offset, &attrib));
       }
+
+      size_t last_offset = 0;
+      for (const auto& attr_it : attributes_by_offset) {
+        assert(attr_it.first >= last_offset);
+        // Emit padding to offset of next fetch attribute, if necessary
+        while (last_offset < attr_it.first) {
+          EmitSource("  uint padding_%u_%u;\n", binding.fetch_constant, last_offset);
+          ++last_offset;
+        }
+        const auto& attrib = *attr_it.second;
+        const char* type_name = GetVertexFormatBaseTypeName(attrib.fetch_instr.attributes.data_format, attrib.fetch_instr.attributes.is_signed);
+        size_t element_count = GetVertexFormatBaseElementCount(attrib.fetch_instr.attributes.data_format);
+        for (size_t element_idx = 0; element_idx < element_count; ++element_idx) {
+          EmitSource("  %s vf%u_%d_%u;\n", type_name, binding.fetch_constant, attrib.fetch_instr.attributes.offset, element_idx);
+        }
+        last_offset = attrib.fetch_instr.attributes.offset + attrib.size_words;
+      }
+      EmitSource("};\n");
+      EmitSource("layout(binding = %u) readonly buffer VertexBinding_%u {\n", binding.binding_index + kFetchConstantBindingOffset, binding.fetch_constant);
+      EmitSource("  VertexBinding_%u_t vertexBinding_%u[];\n", binding.fetch_constant, binding.fetch_constant);
+      EmitSource("};\n");
     }
   }
 
@@ -608,40 +730,133 @@ void GlslShaderTranslator::ProcessVertexFetchInstruction(
 
     switch (instr.opcode) {
       case FetchOpcode::kVertexFetch: {
-        EmitSourceDepth("if (src0.x == gl_VertexID) {\n");
-        Indent();
-
         EmitSourceDepth("pv.");
         for (int i = 0;
              i < GetVertexFormatComponentCount(instr.attributes.data_format);
              ++i) {
           EmitSource("%c", GetCharForComponentIndex(i));
         }
+        EmitSource(" = ");
 
         auto format = instr.attributes.data_format;
-        if (format == VertexFormat::k_10_11_11) {
-          // GL doesn't support this format as a fetch type, so convert it.
-          EmitSource(" = get_10_11_11_%c(vf%u_%d);\n",
-                     instr.attributes.is_signed ? 's' : 'u',
-                     instr.operands[1].storage_index, instr.attributes.offset);
-        } else if (format == VertexFormat::k_2_10_10_10) {
-          EmitSource(" = get_2_10_10_10_%c(vf%u_%d);\n",
-                     instr.attributes.is_signed ? 's' : 'u',
-                     instr.operands[1].storage_index, instr.attributes.offset);
-        } else {
-          EmitSource(" = vf%u_%d;\n", instr.operands[1].storage_index,
-                     instr.attributes.offset);
-        }
+        switch (format) {
+#define FETCH_EL_STR "vertexBinding_%u[uint(src0.x)].vf%u_%d_%u"
+#define FETCH_EL_ATTR(idx) instr.operands[1].storage_index, instr.operands[1].storage_index, instr.attributes.offset, idx
+          case VertexFormat::k_32_FLOAT:
+            EmitSource(FETCH_EL_STR,
+                       FETCH_EL_ATTR(0));
+            break;
 
-        Unindent();
-        EmitSourceDepth("} else {\n");
-        Indent();
+          case VertexFormat::k_32_32_FLOAT:
+            EmitSource("vec2(" FETCH_EL_STR ", " FETCH_EL_STR ")",
+                       FETCH_EL_ATTR(0), FETCH_EL_ATTR(1));
+            break;
 
-        EmitSourceDepth("// UNIMPLEMENTED: Indexed fetch.\n");
-        EmitSourceDepth("pv = vec4(0.0, 0.0, 0.0, 1.0);\n");
+          case VertexFormat::k_32_32_32_FLOAT:
+            EmitSource("vec3(" FETCH_EL_STR ", " FETCH_EL_STR ", " FETCH_EL_STR ")",
+                       FETCH_EL_ATTR(0), FETCH_EL_ATTR(1), FETCH_EL_ATTR(2));
+            break;
 
-        Unindent();
-        EmitSourceDepth("}\n");
+          case VertexFormat::k_32_32_32_32_FLOAT:
+            EmitSource("vec4(" FETCH_EL_STR ", " FETCH_EL_STR ", " FETCH_EL_STR ", " FETCH_EL_STR ")",
+                       FETCH_EL_ATTR(0), FETCH_EL_ATTR(1), FETCH_EL_ATTR(2), FETCH_EL_ATTR(3));
+            break;
+
+          case VertexFormat::k_16_16_FLOAT:
+            EmitSource("unpackHalf2x16(" FETCH_EL_STR ")",
+                       FETCH_EL_ATTR(0));
+            break;
+
+          case VertexFormat::k_16_16_16_16_FLOAT:
+            EmitSource("vec4(unpackHalf2x16(" FETCH_EL_STR "), unpackHalf2x16(" FETCH_EL_STR "))",
+                       FETCH_EL_ATTR(0), FETCH_EL_ATTR(1));
+            break;
+
+          // int(uint) constructor preserves the bit pattern (GLSL 5.4.1 Conversion and Scalar Constructors), so these uint-to-int casts are safe.
+          case VertexFormat::k_32:
+            EmitSource("float(%s(" FETCH_EL_STR "))",
+                       instr.attributes.is_signed ? "int" : "", FETCH_EL_ATTR(0));
+            if (!instr.attributes.is_integer) {
+              EmitSource(" / %ff", instr.attributes.is_signed ? static_cast<float>(0x7fffffff) : static_cast<float>(0xffffffff));
+            }
+            break;
+
+          case VertexFormat::k_32_32:
+            EmitSource("vec2(%s(" FETCH_EL_STR "), %s(" FETCH_EL_STR "))",
+                       instr.attributes.is_signed ? "int" : "", FETCH_EL_ATTR(0),
+                       instr.attributes.is_signed ? "int" : "", FETCH_EL_ATTR(1));
+
+            if (!instr.attributes.is_integer) {
+              EmitSource(" / vec2(%ff)", instr.attributes.is_signed ? static_cast<float>(0x7fffffff) : static_cast<float>(0xffffffff));
+            }
+            break;
+
+          case VertexFormat::k_32_32_32_32:
+            EmitSource("vec4(%s(" FETCH_EL_STR "), %s(" FETCH_EL_STR "), %s(" FETCH_EL_STR "), %s(" FETCH_EL_STR "))",
+                       instr.attributes.is_signed ? "int" : "", FETCH_EL_ATTR(0),
+                       instr.attributes.is_signed ? "int" : "", FETCH_EL_ATTR(1),
+                       instr.attributes.is_signed ? "int" : "", FETCH_EL_ATTR(2),
+                       instr.attributes.is_signed ? "int" : "", FETCH_EL_ATTR(3));
+
+            if (!instr.attributes.is_integer) {
+              EmitSource(" / vec4(%ff)", instr.attributes.is_signed ? static_cast<float>(0x7fffffff) : static_cast<float>(0xffffffff));
+            }
+            break;
+
+          case VertexFormat::k_16_16:
+            if (instr.attributes.is_integer) {
+              EmitSource("get_16_16_%c(" FETCH_EL_STR ")",
+                         instr.attributes.is_signed ? 's' : 'u', FETCH_EL_ATTR(0));
+            } else {
+              EmitSource("%s(" FETCH_EL_STR ")",
+                         instr.attributes.is_signed ? "unpackSnorm2x16" : "unpackUnorm2x16", FETCH_EL_ATTR(0));
+            }
+            break;
+
+          case VertexFormat::k_16_16_16_16:
+            if (instr.attributes.is_integer) {
+              EmitSource("vec4(get_16_16_%c(" FETCH_EL_STR "), get_16_16_%c(" FETCH_EL_STR "))",
+                         instr.attributes.is_signed ? 's' : 'u', FETCH_EL_ATTR(0),
+                         instr.attributes.is_signed ? 's' : 'u', FETCH_EL_ATTR(1));
+            } else {
+              EmitSource("vec4(%s(" FETCH_EL_STR "), %s(" FETCH_EL_STR "))",
+                         instr.attributes.is_signed ? "unpackSnorm2x16" : "unpackUnorm2x16", FETCH_EL_ATTR(0),
+                         instr.attributes.is_signed ? "unpackSnorm2x16" : "unpackUnorm2x16", FETCH_EL_ATTR(1));
+            }
+            break;
+
+          case VertexFormat::k_8_8_8_8:
+            if (instr.attributes.is_integer) {
+              EmitSource("get_8x4_%c(" FETCH_EL_STR ")",
+                         instr.attributes.is_signed ? 's' : 'u', FETCH_EL_ATTR(0));
+            } else {
+              EmitSource("%s(" FETCH_EL_STR ")",
+                         instr.attributes.is_signed ? "unpackSnorm4x8" : "unpackUnorm4x8", FETCH_EL_ATTR(0));
+            }
+            break;
+
+          case VertexFormat::k_11_11_10:
+            EmitSource("get_11_11_10_%c(" FETCH_EL_STR ")",
+                       instr.attributes.is_signed ? 's' : 'u', FETCH_EL_ATTR(0));
+            break;
+
+          case VertexFormat::k_10_11_11:
+            EmitSource("get_10_11_11_%c(" FETCH_EL_STR ")",
+                       instr.attributes.is_signed ? 's' : 'u', FETCH_EL_ATTR(0));
+            break;
+
+          case VertexFormat::k_2_10_10_10:
+            EmitSource("get_2_10_10_10_%c(" FETCH_EL_STR ")",
+                       instr.attributes.is_signed ? 's' : 'u', FETCH_EL_ATTR(0));
+            break;
+
+          default:
+            assert_always();
+        };
+#undef FETCH_EL_STR
+#undef FETCH_EL_ATTR
+      EmitSource(";\n");
+
       } break;
       default:
         assert_always();

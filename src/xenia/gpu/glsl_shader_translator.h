@@ -22,6 +22,8 @@ namespace gpu {
 
 class GlslShaderTranslator : public ShaderTranslator {
  public:
+  static constexpr size_t kFetchConstantBindingOffset = 4; // Add to VertexBinding.fetch_constant to get the binding number for the associated buffer
+
   enum class Dialect {
     kGL45,
     kVulkan,
