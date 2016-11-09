@@ -918,10 +918,8 @@ void GlslShaderTranslator::ProcessTextureFetchInstruction(
             EmitSourceDepth("  pv = texture(samp, src0.xy);\n",
                             instr.operands[1].storage_index);
           } else {
-            // FIXME: This offset is still wrong, somehow.
             EmitSourceDepth(
-                "  pv = texture(samp, src0.xy + (vec2(%.2f, %.2f) / "
-                "textureSize(samp, 0)));\n",
+                "  pv = textureOffset(samp, src0.xy, ivec2(%.2f, %.2f));\n",
                 instr.attributes.offset_x, instr.attributes.offset_y);
           }
 
