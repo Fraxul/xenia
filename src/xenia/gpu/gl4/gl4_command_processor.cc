@@ -1563,7 +1563,8 @@ GL4CommandProcessor::UpdateStatus GL4CommandProcessor::PopulateSampler(
   trace_writer_.WriteMemoryRead(texture_info.guest_address,
                                 texture_info.input_length);
 
-  auto entry_view = texture_cache_.Demand(texture_info, sampler_info);
+  auto blitter = static_cast<xe::ui::gl::GLContext*>(context_.get())->blitter();
+  auto entry_view = texture_cache_.Demand(blitter, texture_info, sampler_info);
   if (!entry_view) {
     // Unable to create/fetch/etc.
     XELOGE("Failed to demand texture");

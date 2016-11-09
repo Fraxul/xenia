@@ -210,9 +210,11 @@ void TextureCache::EvictAllTextures() {
 }
 
 TextureCache::TextureEntryView* TextureCache::Demand(
-    const TextureInfo& texture_info, const SamplerInfo& sampler_info) {
+    Blitter* blitter, const TextureInfo& texture_info,
+    const SamplerInfo& sampler_info) {
   uint64_t texture_hash = texture_info.hash();
-  auto texture_entry = LookupOrInsertTexture(texture_info, texture_hash);
+  auto texture_entry = LookupOrInsertTexture(blitter, texture_info,
+    texture_hash);
   if (!texture_entry) {
     XELOGE("Failed to setup texture");
     return nullptr;
@@ -408,7 +410,8 @@ void TextureCache::EvictSampler(SamplerEntry* entry) {
 }
 
 TextureCache::TextureEntry* TextureCache::LookupOrInsertTexture(
-    const TextureInfo& texture_info, uint64_t opt_hash) {
+    Blitter* blitter, const TextureInfo& texture_info,
+    uint64_t opt_hash) {
   const uint64_t hash = opt_hash ? opt_hash : texture_info.hash();
   for (auto it = texture_entries_.find(hash); it != texture_entries_.end();
        ++it) {
@@ -444,6 +447,35 @@ TextureCache::TextureEntry* TextureCache::LookupOrInsertTexture(
       entry->handle = read_buffer_entry->handle;
       entry->access_watch_handle = read_buffer_entry->access_watch_handle;
       delete read_buffer_entry;
+
+      // Check the readbuffer texture's logical dimensions against the dimensions
+      // specified in the TextureInfo for this fetch. The readbuffer texture may
+      // be larger and require trimming before use.
+
+      if ((read_buffer_entry->logical_height != texture_info.size_2d.logical_height) ||
+        (read_buffer_entry->logical_width != texture_info.size_2d.logical_width)) {
+
+        // Copy the relevant region to a new texture and use that instead.
+        Rect2D relevant_region(0, 0, texture_info.size_2d.logical_width, texture_info.size_2d.logical_height);
+
+        GLuint handle;
+        glCreateTextures(GL_TEXTURE_2D, 1, &handle);
+        glTextureParameteri(handle, GL_TEXTURE_BASE_LEVEL, 0);
+        glTextureParameteri(handle, GL_TEXTURE_MAX_LEVEL, 1);
+        glTextureStorage2D(handle, 1, read_buffer_entry->internal_format, relevant_region.width, relevant_region.height);
+
+        if (read_buffer_entry->is_depth_stencil) {
+          blitter->CopyDepthTexture(read_buffer_entry->handle, relevant_region, handle, relevant_region);
+        } else {
+          blitter->CopyColorTexture2D(read_buffer_entry->handle, relevant_region, handle, relevant_region, GL_NEAREST, false);
+        }
+        // clean up readbuffer texture
+        glDeleteTextures(1, &read_buffer_entry->handle);
+        // and use the new one instead
+        entry->handle = handle;
+
+      }
+
       // TODO(benvanik): set more texture properties? swizzle/etc?
       auto entry_ptr = entry.get();
       texture_entries_.insert({hash, entry.release()});
@@ -632,6 +664,8 @@ GLuint TextureCache::ConvertTexture(Blitter* blitter, uint32_t guest_address,
   entry->block_width = block_width;
   entry->block_height = block_height;
   entry->format = format;
+  entry->internal_format = config.internal_format;
+  entry->is_depth_stencil = (config.format == GL_DEPTH_STENCIL);
 
   entry->access_watch_handle = memory_->AddPhysicalAccessWatch(
       guest_address, block_height * block_width * 4,

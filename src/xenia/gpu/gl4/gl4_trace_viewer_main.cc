@@ -47,9 +47,11 @@ class GL4TraceViewer : public TraceViewer {
                             const SamplerInfo& sampler_info) override {
     auto command_processor = static_cast<GL4CommandProcessor*>(
         graphics_system_->command_processor());
-
+    auto blitter = static_cast<xe::ui::gl::GLContext*>(
+        command_processor->graphicsContext())->blitter();
     auto entry_view =
-        command_processor->texture_cache()->Demand(texture_info, sampler_info);
+        command_processor->texture_cache()->Demand(blitter, texture_info,
+                                                   sampler_info);
     if (!entry_view) {
       return 0;
     }

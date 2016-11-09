@@ -60,7 +60,7 @@ class TextureCache {
   void Clear();
   void EvictAllTextures();
 
-  TextureEntryView* Demand(const TextureInfo& texture_info,
+  TextureEntryView* Demand(Blitter*, const TextureInfo& texture_info,
                            const SamplerInfo& sampler_info);
 
   GLuint CopyTexture(Blitter* blitter, uint32_t guest_address,
@@ -87,12 +87,14 @@ class TextureCache {
     uint32_t block_height;
     TextureFormat format;
     GLuint handle;
+    GLuint internal_format;
+    bool is_depth_stencil;
   };
 
   SamplerEntry* LookupOrInsertSampler(const SamplerInfo& sampler_info,
                                       uint64_t opt_hash = 0);
   void EvictSampler(SamplerEntry* entry);
-  TextureEntry* LookupOrInsertTexture(const TextureInfo& texture_info,
+  TextureEntry* LookupOrInsertTexture(Blitter*, const TextureInfo& texture_info,
                                       uint64_t opt_hash = 0);
   void EvictTexture(TextureEntry* entry);
 

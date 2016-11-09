@@ -104,6 +104,8 @@ class CommandProcessor {
   bool Save(ByteStream* stream);
   bool Restore(ByteStream* stream);
 
+  xe::ui::GraphicsContext* graphicsContext() const { return context_.get(); }
+
  protected:
   struct IndexBufferInfo {
     IndexFormat format = IndexFormat::kInt16;
