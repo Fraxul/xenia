@@ -2023,11 +2023,13 @@ GLuint GL4CommandProcessor::GetColorRenderTarget(
       break;
     case ColorRenderTargetFormat::k_2_10_10_10:
     case ColorRenderTargetFormat::k_2_10_10_10_unknown:
-      internal_format = GL_RGB10_A2UI;
+      internal_format = GL_RGB10_A2;
       break;
     case ColorRenderTargetFormat::k_2_10_10_10_FLOAT:
     case ColorRenderTargetFormat::k_2_10_10_10_FLOAT_unknown:
-      internal_format = GL_RGB10_A2;
+      // Packed 7e3 floating point format. Not supported natively in GL;
+      // the next closest format is RGBA16F.
+      internal_format = GL_RGBA16F;
       break;
     case ColorRenderTargetFormat::k_16_16:
       internal_format = GL_RG16;
