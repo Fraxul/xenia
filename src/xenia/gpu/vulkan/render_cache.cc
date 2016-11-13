@@ -37,9 +37,12 @@ VkFormat ColorRenderTargetFormatToVkFormat(ColorRenderTargetFormat format) {
       return VK_FORMAT_A2R10G10B10_UNORM_PACK32;
     case ColorRenderTargetFormat::k_2_10_10_10_FLOAT:
     case ColorRenderTargetFormat::k_2_10_10_10_FLOAT_unknown:
-      // WARNING: this is wrong, most likely - no float form in vulkan?
-      XELOGW("Unsupported EDRAM format k_2_10_10_10_FLOAT used");
-      return VK_FORMAT_A2R10G10B10_UNORM_PACK32;
+      // the XB360's 2_10_10_10_FLOAT float is unsigned 7e3 per component,
+      // primarily useful for additive blending of HDR targets. The closest
+      // color-renderable format that we can use is RGBA16F. Vulkan also
+      // exposes VK_FORMAT_B10G11R11_UFLOAT_PACK32, but it's missing the
+      // alpha channel and is not guaranteed to be a color-renderable format.
+      return VK_FORMAT_R16G16B16A16_SFLOAT;
     case ColorRenderTargetFormat::k_16_16:
       return VK_FORMAT_R16G16_UNORM;
     case ColorRenderTargetFormat::k_16_16_16_16:
@@ -135,6 +138,8 @@ CachedTileView::CachedTileView(ui::vulkan::VulkanDevice* device,
     auto edram_format = static_cast<ColorRenderTargetFormat>(key.edram_format);
     vulkan_format = ColorRenderTargetFormatToVkFormat(edram_format);
     switch (edram_format) {
+      case ColorRenderTargetFormat::k_2_10_10_10_FLOAT: // RGBA16f
+      case ColorRenderTargetFormat::k_2_10_10_10_FLOAT_unknown: // RGBA16f
       case ColorRenderTargetFormat::k_16_16_16_16:
       case ColorRenderTargetFormat::k_16_16_16_16_FLOAT:
       case ColorRenderTargetFormat::k_32_32_FLOAT:
