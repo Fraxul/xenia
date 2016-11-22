@@ -227,63 +227,34 @@ void SpirvShaderTranslator::StartTranslation() {
   if (is_vertex_shader()) {
     // Vertex inputs/outputs.
     for (const auto& binding : vertex_bindings()) {
-      for (const auto& attrib : binding.attributes) {
-        Id attrib_type = 0;
-        bool is_signed = attrib.fetch_instr.attributes.is_signed;
-        bool is_integer = attrib.fetch_instr.attributes.is_integer;
-        switch (attrib.fetch_instr.attributes.data_format) {
-          case VertexFormat::k_32:
-          case VertexFormat::k_32_FLOAT:
-            attrib_type = float_type_;
-            break;
-          case VertexFormat::k_16_16:
-          case VertexFormat::k_32_32:
-            if (is_integer) {
-              attrib_type = is_signed ? vec2_int_type_ : vec2_uint_type_;
-              break;
-            }
-          case VertexFormat::k_16_16_FLOAT:
-          case VertexFormat::k_32_32_FLOAT:
-            attrib_type = vec2_float_type_;
-            break;
-          case VertexFormat::k_32_32_32_FLOAT:
-            attrib_type = vec3_float_type_;
-            break;
-          case VertexFormat::k_2_10_10_10:
-            attrib_type = vec4_float_type_;
-            break;
-          case VertexFormat::k_8_8_8_8:
-          case VertexFormat::k_16_16_16_16:
-          case VertexFormat::k_32_32_32_32:
-            if (is_integer) {
-              attrib_type = is_signed ? vec4_int_type_ : vec4_uint_type_;
-              break;
-            }
-          case VertexFormat::k_16_16_16_16_FLOAT:
-          case VertexFormat::k_32_32_32_32_FLOAT:
-            attrib_type = vec4_float_type_;
-            break;
-          case VertexFormat::k_10_11_11:
-          case VertexFormat::k_11_11_10:
-            // Manually converted.
-            attrib_type = is_signed ? int_type_ : uint_type_;
-            break;
-          default:
-            assert_always();
-        }
-
-        auto attrib_var = b.createVariable(
-            spv::StorageClass::StorageClassInput, attrib_type,
-            xe::format_string("vf%d_%d", binding.fetch_constant,
-                              attrib.fetch_instr.attributes.offset)
-                .c_str());
-        b.addDecoration(attrib_var, spv::Decoration::DecorationLocation,
-                        attrib.attrib_index);
-
-        interface_ids_.push_back(attrib_var);
-        vertex_binding_map_[binding.fetch_constant]
-                           [attrib.fetch_instr.attributes.offset] = attrib_var;
+      char binding_struct_name[32];
+      char binding_array_struct_typename[32];
+      snprintf(binding_struct_name, 32, "vf%u", binding.fetch_constant);
+      snprintf(binding_array_struct_typename, 32, "vf%u_t", binding.fetch_constant);
+      Id binding_array_struct_type = b.makeStructType(std::vector<Id>(binding.stride_words, uint_type_), binding_array_struct_typename);
+      for (unsigned int idx = 0; idx < binding.stride_words; ++idx) {
+          b.addMemberDecoration(binding_array_struct_type, idx, spv::DecorationOffset, (int) (idx * 4));
       }
+
+#if 1
+      Id binding_array = b.makeRuntimeArray(binding_array_struct_type);
+      b.addDecoration(binding_array, spv::DecorationArrayStride, binding.stride_words * 4);
+      Id binding_struct_type = b.makeStructType({binding_array}, binding_struct_name);
+      b.addDecoration(binding_struct_type, spv::DecorationBufferBlock);
+      Id binding_struct_ptr = b.makePointer(spv::StorageClassUniform, binding_struct_type);
+      Id binding_struct_var = b.createVariable(spv::StorageClassUniform, binding_struct_type);
+      b.addDecoration(binding_struct_var, spv::DecorationDescriptorSet, 2);
+      b.addDecoration(binding_struct_var, spv::DecorationBinding, binding.binding_index);
+      vertex_binding_map_[binding.fetch_constant] = binding_struct_var;
+
+#else
+
+      Id binding_struct_ptr = b.makePointer(spv::StorageClassUniform, binding_array_struct_type);
+      Id binding_struct_var = b.createVariable(spv::StorageClassUniform, binding_struct_ptr);
+      b.addDecoration(binding_struct_var, spv::Decoration::DecorationLocation, binding.binding_index);
+      vertex_binding_map_[binding.fetch_constant] = binding_struct_var;
+
+#endif
     }
 
     interpolators_ = b.createVariable(spv::StorageClass::StorageClassOutput,
@@ -303,7 +274,7 @@ void SpirvShaderTranslator::StartTranslation() {
     b.addDecoration(point_size_, spv::Decoration::DecorationLocation, 17);
     // Set default point-size value (-1.0f, indicating to the geometry shader
     // that the register value should be used instead of the per-vertex value)
-    b.createStore(point_size_, b.makeFloatConstant(-1.0f));
+    b.createStore(b.makeFloatConstant(-1.0f), point_size_);
 
     point_coord_ = b.createVariable(spv::StorageClass::StorageClassOutput,
                                     vec2_float_type_, "point_coord");
@@ -311,10 +282,10 @@ void SpirvShaderTranslator::StartTranslation() {
     // point_coord is only ever populated in a geometry shader. Just write
     // zero to it in the vertex shader.
     b.createStore(
-        point_coord_,
         b.makeCompositeConstant(vec2_float_type_,
                                 std::vector<Id>({b.makeFloatConstant(0.0f),
-                                                 b.makeFloatConstant(0.0f)})));
+                                                 b.makeFloatConstant(0.0f)})),
+        point_coord_);
 
     pos_ = b.createVariable(spv::StorageClass::StorageClassOutput,
                             vec4_float_type_, "gl_Position");
@@ -628,17 +599,6 @@ std::vector<uint8_t> SpirvShaderTranslator::CompleteTranslation() {
 }
 
 void SpirvShaderTranslator::PostTranslation(Shader* shader) {
-  // Validation.
-  if (FLAGS_spv_validate) {
-    auto validation = validator_.Validate(
-        reinterpret_cast<const uint32_t*>(shader->translated_binary().data()),
-        shader->translated_binary().size() / sizeof(uint32_t));
-    if (validation->has_error()) {
-      XELOGE("SPIR-V Shader Validation failed! Error: %s",
-             validation->error_string());
-    }
-  }
-
   // TODO(benvanik): only if needed? could be slowish.
   auto disasm = disassembler_.Disassemble(
       reinterpret_cast<const uint32_t*>(shader->translated_binary().data()),
@@ -647,6 +607,19 @@ void SpirvShaderTranslator::PostTranslation(Shader* shader) {
     XELOGE("Failed to disassemble SPIRV - invalid?");
   } else {
     set_host_disassembly(shader, disasm->to_string());
+  }
+
+  // Validation.
+  if (FLAGS_spv_validate) {
+    auto validation = validator_.Validate(
+      reinterpret_cast<const uint32_t*>(shader->translated_binary().data()),
+      shader->translated_binary().size() / sizeof(uint32_t));
+    if (validation->has_error()) {
+      XELOGE("SPIR-V Shader Validation failed! Error: %s",
+        validation->error_string());
+      XELOGE("%s", shader->host_disassembly().c_str());
+      assert_always();
+    }
   }
 }
 
@@ -1074,65 +1047,157 @@ void SpirvShaderTranslator::ProcessVertexFetchInstruction(
 
   // Operand 0 is the index
   // Operand 1 is the binding
-  // TODO: Indexed fetch
   auto vertex_idx = LoadFromOperand(instr.operands[0]);
   vertex_idx = b.createUnaryOp(spv::Op::OpConvertFToS, int_type_, vertex_idx);
-  auto shader_vertex_idx = b.createLoad(vertex_idx_);
 
   auto vertex_components =
       GetVertexFormatComponentCount(instr.attributes.data_format);
 
-  // Skip loading if it's an indexed fetch.
-  auto vertex_ptr = vertex_binding_map_[instr.operands[1].storage_index]
-                                       [instr.attributes.offset];
-  assert_not_zero(vertex_ptr);
-  auto vertex = b.createLoad(vertex_ptr);
-
-  auto cond = b.createBinOp(spv::Op::OpIEqual, bool_type_, vertex_idx,
-                            shader_vertex_idx);
-  Id alt_vertex = 0;
-  switch (vertex_components) {
-    case 1:
-      alt_vertex = b.makeFloatConstant(0.f);
-      break;
-    case 2:
-      alt_vertex = b.makeCompositeConstant(
-          vec2_float_type_, std::vector<Id>({b.makeFloatConstant(0.f),
-                                             b.makeFloatConstant(1.f)}));
-      cond = b.smearScalar(spv::NoPrecision, cond, vec2_bool_type_);
-      break;
-    case 3:
-      alt_vertex = b.makeCompositeConstant(
-          vec3_float_type_,
-          std::vector<Id>({b.makeFloatConstant(0.f), b.makeFloatConstant(0.f),
-                           b.makeFloatConstant(1.f)}));
-      cond = b.smearScalar(spv::NoPrecision, cond, vec3_bool_type_);
-      break;
-    case 4:
-      alt_vertex = b.makeCompositeConstant(
-          vec4_float_type_,
-          std::vector<Id>({b.makeFloatConstant(0.f), b.makeFloatConstant(0.f),
-                           b.makeFloatConstant(0.f),
-                           b.makeFloatConstant(1.f)}));
-      cond = b.smearScalar(spv::NoPrecision, cond, vec4_bool_type_);
-      break;
-    default:
-      assert_unhandled_case(vertex_components);
+  // Preload the relevant words from the vertex buffer
+  std::vector<spv::Id> vertex_words;
+  for (size_t word = 0; word < GetVertexFormatSizeInWords(instr.attributes.data_format); ++word) {
+    vertex_words.push_back(b.createLoad(b.createAccessChain(spv::StorageClassUniform, vertex_binding_map_[instr.operands[1].storage_index], std::vector<Id>({b.makeIntConstant(0), vertex_idx, b.makeIntConstant(static_cast<int>(instr.attributes.offset + word)) }))));
   }
 
+  spv::Id vertex = 0;
+
+  // Perform data conversion
   switch (instr.attributes.data_format) {
-    case VertexFormat::k_8_8_8_8:
-    case VertexFormat::k_16_16:
-    case VertexFormat::k_16_16_16_16:
+    case VertexFormat::k_8_8_8_8: {
+      bool is_signed = instr.attributes.is_signed;
+      if (is_signed) {
+        vertex_words[0] = b.createUnaryOp(spv::OpBitcast, int_type_, vertex_words[0]);
+      }
+      if (instr.attributes.is_integer) {
+        auto component_type = is_signed ? int_type_ : uint_type_;
+        auto result_type = is_signed ? vec4_int_type_ : vec4_uint_type_;
+        spv::Id components[4] = {0};
+        components[0] = BitfieldExtract(component_type, vertex_words[0], is_signed,  0, 8);
+        components[1] = BitfieldExtract(component_type, vertex_words[0], is_signed,  8, 8);
+        components[2] = BitfieldExtract(component_type, vertex_words[0], is_signed, 16, 8);
+        components[3] = BitfieldExtract(component_type, vertex_words[0], is_signed, 24, 8);
+        vertex = b.createCompositeConstruct(result_type, std::vector<Id>({ components[0], components[1], components[2], components[3] }));
+      }
+      else {
+        GLSLstd450 opcode = is_signed ? GLSLstd450::kUnpackSnorm4x8 : GLSLstd450::kUnpackUnorm4x8;
+        vertex = CreateGlslStd450InstructionCall(spv::NoPrecision, vec4_float_type_, opcode, std::vector<Id>({vertex_words[0]}));
+      }
+    } break;
+
+    case VertexFormat::k_16_16: {
+      bool is_signed = instr.attributes.is_signed;
+      if (is_signed) {
+        vertex_words[0] = b.createUnaryOp(spv::OpBitcast, int_type_, vertex_words[0]);
+      }
+      if (instr.attributes.is_integer) {
+        auto component_type = is_signed ? int_type_ : uint_type_;
+        auto result_type = is_signed ? vec2_int_type_ : vec2_uint_type_;
+        spv::Id components[2] = { 0 };
+        components[0] = BitfieldExtract(component_type, vertex_words[0], is_signed, 00, 16);
+        components[1] = BitfieldExtract(component_type, vertex_words[0], is_signed, 16, 16);
+        vertex = b.createCompositeConstruct(result_type, std::vector<Id>({ components[0], components[1] }));
+      }
+      else {
+        GLSLstd450 opcode = is_signed ? GLSLstd450::kUnpackSnorm2x16 : GLSLstd450::kUnpackUnorm2x16;
+        vertex = CreateGlslStd450InstructionCall(spv::NoPrecision, vec2_float_type_, opcode, std::vector<Id>({vertex_words[0]}));
+      }
+    } break;
+
+    case VertexFormat::k_16_16_16_16: {
+      bool is_signed = instr.attributes.is_signed;
+      if (is_signed) {
+        for (size_t word = 0; word < vertex_words.size(); ++word)
+          vertex_words[word] = b.createUnaryOp(spv::OpBitcast, int_type_, vertex_words[word]);
+      }
+      if (instr.attributes.is_integer) {
+        auto component_type = is_signed ? int_type_ : uint_type_;
+        auto result_type = is_signed ? vec4_int_type_ : vec4_uint_type_;
+        spv::Id components[4] = {0};
+        components[0] = BitfieldExtract(component_type, vertex_words[0], is_signed, 00, 16);
+        components[1] = BitfieldExtract(component_type, vertex_words[0], is_signed, 16, 16);
+        components[2] = BitfieldExtract(component_type, vertex_words[1], is_signed, 00, 16);
+        components[3] = BitfieldExtract(component_type, vertex_words[1], is_signed, 16, 16);
+        vertex = b.createCompositeConstruct(result_type, std::vector<Id>({components[0], components[1], components[2], components[3]}));
+      }
+      else {
+        GLSLstd450 opcode = is_signed ? GLSLstd450::kUnpackSnorm2x16 : GLSLstd450::kUnpackUnorm2x16;
+        vertex = b.createCompositeConstruct(vec4_float_type_, std::vector<Id>({
+          CreateGlslStd450InstructionCall(spv::NoPrecision, vec2_float_type_, opcode, std::vector<Id>({vertex_words[0]})),
+          CreateGlslStd450InstructionCall(spv::NoPrecision, vec2_float_type_, opcode, std::vector<Id>({vertex_words[1]}))
+        }));
+      }
+    } break;
+
+    case VertexFormat::k_16_16_FLOAT:
+      vertex = CreateGlslStd450InstructionCall(spv::NoPrecision, vec2_float_type_, GLSLstd450::kUnpackHalf2x16, std::vector<Id>({vertex_words[0]}));
+      break;
+
     case VertexFormat::k_16_16_16_16_FLOAT:
-    case VertexFormat::k_32:
-    case VertexFormat::k_32_32:
-    case VertexFormat::k_32_32_32_32:
+      vertex = b.createCompositeConstruct(vec4_float_type_, std::vector<Id>({
+          CreateGlslStd450InstructionCall(spv::NoPrecision, vec2_float_type_, GLSLstd450::kUnpackHalf2x16, std::vector<Id>({vertex_words[0]})),
+          CreateGlslStd450InstructionCall(spv::NoPrecision, vec2_float_type_, GLSLstd450::kUnpackHalf2x16, std::vector<Id>({vertex_words[1]}))
+      }));
+      break;
+
+    case VertexFormat::k_32: {
+      bool is_signed = instr.attributes.is_signed;
+      if (is_signed) {
+        vertex = b.createUnaryOp(spv::OpBitcast, int_type_, vertex_words[0]);
+      } else {
+        vertex = vertex_words[0];
+      }
+    } break;
+
+    case VertexFormat::k_32_32: {
+      bool is_signed = instr.attributes.is_signed;
+      if (is_signed) {
+        for (size_t word = 0; word < vertex_words.size(); ++word)
+          vertex_words[word] = b.createUnaryOp(spv::OpBitcast, int_type_, vertex_words[word]);
+      }
+      auto comp_type = is_signed ? int_type_ : uint_type_;
+      auto result_type = is_signed ? vec2_int_type_ : vec2_uint_type_;
+
+      vertex = b.createCompositeConstruct(result_type, vertex_words);
+    } break;
+
+    case VertexFormat::k_32_32_32_32: {
+      bool is_signed = instr.attributes.is_signed;
+      if (is_signed) {
+        for (size_t word = 0; word < vertex_words.size(); ++word)
+          vertex_words[word] = b.createUnaryOp(spv::OpBitcast, int_type_, vertex_words[word]);
+      }
+      auto comp_type = is_signed ? int_type_ : uint_type_;
+      auto result_type = is_signed ? vec4_int_type_ : vec4_uint_type_;
+
+      vertex = b.createCompositeConstruct(result_type, vertex_words);
+    } break;
+
     case VertexFormat::k_32_FLOAT:
+      vertex = b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[0]);
+      break;
+
     case VertexFormat::k_32_32_FLOAT:
+      vertex = b.createCompositeConstruct(vec2_float_type_, std::vector<Id>({
+        b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[0]),
+        b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[1])
+      }));
+      break;
+
     case VertexFormat::k_32_32_32_FLOAT:
+      vertex = b.createCompositeConstruct(vec3_float_type_, std::vector<Id>({
+        b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[0]),
+        b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[1]),
+        b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[2])
+      }));
+      break;
+
     case VertexFormat::k_32_32_32_32_FLOAT:
-      // These are handled, for now.
+      vertex = b.createCompositeConstruct(vec4_float_type_, std::vector<Id>({
+          b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[0]),
+          b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[1]),
+          b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[2]),
+          b.createUnaryOp(spv::OpBitcast, float_type_, vertex_words[3])
+      }));
       break;
 
     case VertexFormat::k_10_11_11: {
@@ -1141,24 +1206,24 @@ void SpirvShaderTranslator::ProcessVertexFetchInstruction(
       auto op =
           is_signed ? spv::Op::OpBitFieldSExtract : spv::Op::OpBitFieldUExtract;
       auto comp_type = is_signed ? int_type_ : uint_type_;
-
-      assert_true(comp_type == b.getTypeId(vertex));
+      vertex_words[0] = b.createUnaryOp(spv::OpBitcast, comp_type, vertex_words[0]);
 
       spv::Id components[3] = {0};
       /*
       components[2] = b.createTriOp(
-          op, comp_type, vertex, b.makeUintConstant(0), b.makeUintConstant(10));
+          op, comp_type, vertex_words[0], b.makeUintConstant(0),
+          b.makeUintConstant(10));
       components[1] =
-          b.createTriOp(op, comp_type, vertex, b.makeUintConstant(10),
+          b.createTriOp(op, comp_type, vertex_words[0], b.makeUintConstant(10),
                         b.makeUintConstant(11));
       components[0] =
-          b.createTriOp(op, comp_type, vertex, b.makeUintConstant(21),
+          b.createTriOp(op, comp_type, vertex_words[0], b.makeUintConstant(21),
                         b.makeUintConstant(11));
       */
       // Workaround until NVIDIA fixes their compiler :|
-      components[0] = BitfieldExtract(comp_type, vertex, is_signed, 00, 11);
-      components[1] = BitfieldExtract(comp_type, vertex, is_signed, 11, 11);
-      components[2] = BitfieldExtract(comp_type, vertex, is_signed, 22, 10);
+      components[0] = BitfieldExtract(comp_type, vertex_words[0], is_signed, 00, 11);
+      components[1] = BitfieldExtract(comp_type, vertex_words[0], is_signed, 11, 11);
+      components[2] = BitfieldExtract(comp_type, vertex_words[0], is_signed, 22, 10);
 
       op = is_signed ? spv::Op::OpConvertSToF : spv::Op::OpConvertUToF;
       for (int i = 0; i < 3; i++) {
@@ -1180,22 +1245,24 @@ void SpirvShaderTranslator::ProcessVertexFetchInstruction(
       auto op =
           is_signed ? spv::Op::OpBitFieldSExtract : spv::Op::OpBitFieldUExtract;
       auto comp_type = is_signed ? int_type_ : uint_type_;
+      vertex_words[0] = b.createUnaryOp(spv::OpBitcast, comp_type, vertex_words[0]);
 
       spv::Id components[3] = {0};
       /*
       components[2] = b.createTriOp(
-          op, comp_type, vertex, b.makeUintConstant(0), b.makeUintConstant(11));
+          op, comp_type, vertex_words[0], b.makeUintConstant(0),
+          b.makeUintConstant(11));
       components[1] =
-          b.createTriOp(op, comp_type, vertex, b.makeUintConstant(11),
+          b.createTriOp(op, comp_type, vertex_words[0], b.makeUintConstant(11),
                         b.makeUintConstant(11));
       components[0] =
-          b.createTriOp(op, comp_type, vertex, b.makeUintConstant(22),
+          b.createTriOp(op, comp_type, vertex_words[0], b.makeUintConstant(22),
                         b.makeUintConstant(10));
       */
       // Workaround until NVIDIA fixes their compiler :|
-      components[0] = BitfieldExtract(comp_type, vertex, is_signed, 00, 10);
-      components[1] = BitfieldExtract(comp_type, vertex, is_signed, 10, 11);
-      components[2] = BitfieldExtract(comp_type, vertex, is_signed, 21, 11);
+      components[0] = BitfieldExtract(comp_type, vertex_words[0], is_signed, 00, 10);
+      components[1] = BitfieldExtract(comp_type, vertex_words[0], is_signed, 10, 11);
+      components[2] = BitfieldExtract(comp_type, vertex_words[0], is_signed, 21, 11);
 
       op = is_signed ? spv::Op::OpConvertSToF : spv::Op::OpConvertUToF;
       for (int i = 0; i < 3; i++) {
@@ -1210,7 +1277,12 @@ void SpirvShaderTranslator::ProcessVertexFetchInstruction(
           vec3_float_type_,
           std::vector<Id>({components[0], components[1], components[2]}));
     } break;
+
+    default:
+      // Unhandled format
+      assert_always();
   }
+  assert(vertex != 0);
 
   // Convert any integers to floats.
   auto scalar_type = b.getScalarTypeId(b.getTypeId(vertex));
@@ -1236,8 +1308,6 @@ void SpirvShaderTranslator::ProcessVertexFetchInstruction(
     vertex = b.createUnaryOp(op, vtx_type, vertex);
   }
 
-  vertex = b.createTriOp(spv::Op::OpSelect, b.getTypeId(vertex), cond, vertex,
-                         alt_vertex);
   StoreToResult(vertex, instr.result);
 }
 
@@ -2524,8 +2594,9 @@ Id SpirvShaderTranslator::LoadFromOperand(const InstructionOperand& op) {
     case InstructionStorageAddressingMode::kAddressAbsolute: {
       // storage_index + a0
       storage_index =
-          b.createBinOp(spv::Op::OpIAdd, uint_type_, b.createLoad(a0_),
-                        b.makeUintConstant(storage_base + op.storage_index));
+          b.createUnaryOp(spv::Op::OpBitcast, uint_type_,
+          b.createBinOp(spv::Op::OpIAdd, int_type_, b.createLoad(a0_),
+                        b.makeIntConstant(storage_base + op.storage_index)));
     } break;
     case InstructionStorageAddressingMode::kAddressRelative: {
       // TODO: Based on loop index

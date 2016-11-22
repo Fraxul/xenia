@@ -41,7 +41,8 @@ class PipelineCache {
 
   PipelineCache(RegisterFile* register_file, ui::vulkan::VulkanDevice* device,
                 VkDescriptorSetLayout uniform_descriptor_set_layout,
-                VkDescriptorSetLayout texture_descriptor_set_layout);
+                VkDescriptorSetLayout texture_descriptor_set_layout,
+                VkDescriptorSetLayout vertex_fetch_descriptor_set_layout);
   ~PipelineCache();
 
   // Loads a shader from the cache, possibly translating it.

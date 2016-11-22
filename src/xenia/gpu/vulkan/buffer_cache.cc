@@ -31,7 +31,8 @@ BufferCache::BufferCache(RegisterFile* register_file,
   transient_buffer_ = std::make_unique<ui::vulkan::CircularBuffer>(
       device,
       VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+          VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+          VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
       capacity);
 
   VkMemoryRequirements pool_reqs;
@@ -50,11 +51,13 @@ BufferCache::BufferCache(RegisterFile* register_file,
   descriptor_pool_info.pNext = nullptr;
   descriptor_pool_info.flags =
       VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-  descriptor_pool_info.maxSets = 1;
-  VkDescriptorPoolSize pool_sizes[1];
+  descriptor_pool_info.maxSets = 2;
+  VkDescriptorPoolSize pool_sizes[2];
   pool_sizes[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
   pool_sizes[0].descriptorCount = 2;
-  descriptor_pool_info.poolSizeCount = 1;
+  pool_sizes[1].type = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+  pool_sizes[1].descriptorCount = 32;
+  descriptor_pool_info.poolSizeCount = 2;
   descriptor_pool_info.pPoolSizes = pool_sizes;
   auto err = vkCreateDescriptorPool(device_, &descriptor_pool_info, nullptr,
                                     &descriptor_pool_);
@@ -77,41 +80,62 @@ BufferCache::BufferCache(RegisterFile* register_file,
   fragment_uniform_binding.descriptorCount = 1;
   fragment_uniform_binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
   fragment_uniform_binding.pImmutableSamplers = nullptr;
-  VkDescriptorSetLayoutCreateInfo descriptor_set_layout_info;
-  descriptor_set_layout_info.sType =
+  VkDescriptorSetLayoutCreateInfo transient_descriptor_set_layout_info;
+  transient_descriptor_set_layout_info.sType =
       VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
-  descriptor_set_layout_info.pNext = nullptr;
-  descriptor_set_layout_info.flags = 0;
+  transient_descriptor_set_layout_info.pNext = nullptr;
+  transient_descriptor_set_layout_info.flags = 0;
   VkDescriptorSetLayoutBinding uniform_bindings[] = {
-      vertex_uniform_binding, fragment_uniform_binding,
+      vertex_uniform_binding, fragment_uniform_binding
   };
-  descriptor_set_layout_info.bindingCount =
+  transient_descriptor_set_layout_info.bindingCount =
       static_cast<uint32_t>(xe::countof(uniform_bindings));
-  descriptor_set_layout_info.pBindings = uniform_bindings;
-  err = vkCreateDescriptorSetLayout(device_, &descriptor_set_layout_info,
-                                    nullptr, &descriptor_set_layout_);
+  transient_descriptor_set_layout_info.pBindings = uniform_bindings;
+  err = vkCreateDescriptorSetLayout(device_, &transient_descriptor_set_layout_info,
+                                    nullptr, &transient_descriptor_set_layout_);
   CheckResult(err, "vkCreateDescriptorSetLayout");
+
+
+
+  VkDescriptorSetLayoutBinding vertex_fetch_binding;
+  vertex_fetch_binding.binding = 0;
+  vertex_fetch_binding.descriptorType =
+    VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+  vertex_fetch_binding.descriptorCount = 32;
+  vertex_fetch_binding.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+  vertex_fetch_binding.pImmutableSamplers = nullptr;
+  VkDescriptorSetLayoutCreateInfo vertex_fetch_descriptor_set_layout_info;
+  vertex_fetch_descriptor_set_layout_info.sType =
+    VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+  vertex_fetch_descriptor_set_layout_info.pNext = nullptr;
+  vertex_fetch_descriptor_set_layout_info.flags = 0;
+  vertex_fetch_descriptor_set_layout_info.bindingCount = 1;
+  vertex_fetch_descriptor_set_layout_info.pBindings = &vertex_fetch_binding;
+  err = vkCreateDescriptorSetLayout(device_, &vertex_fetch_descriptor_set_layout_info,
+    nullptr, &vertex_fetch_descriptor_set_layout_);
+  CheckResult(err, "vkCreateDescriptorSetLayout");
+
 
   // Create the descriptor we'll use for the uniform buffer.
   // This is what we hand out to everyone (who then also needs to use our
   // offsets).
-  VkDescriptorSetAllocateInfo set_alloc_info;
-  set_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
-  set_alloc_info.pNext = nullptr;
-  set_alloc_info.descriptorPool = descriptor_pool_;
-  set_alloc_info.descriptorSetCount = 1;
-  set_alloc_info.pSetLayouts = &descriptor_set_layout_;
-  err = vkAllocateDescriptorSets(device_, &set_alloc_info,
+  VkDescriptorSetAllocateInfo transient_set_alloc_info;
+  transient_set_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  transient_set_alloc_info.pNext = nullptr;
+  transient_set_alloc_info.descriptorPool = descriptor_pool_;
+  transient_set_alloc_info.descriptorSetCount = 1;
+  transient_set_alloc_info.pSetLayouts = &transient_descriptor_set_layout_;
+  err = vkAllocateDescriptorSets(device_, &transient_set_alloc_info,
                                  &transient_descriptor_set_);
   CheckResult(err, "vkAllocateDescriptorSets");
 
   // Initialize descriptor set with our buffers.
-  VkDescriptorBufferInfo buffer_info;
-  buffer_info.buffer = transient_buffer_->gpu_buffer();
-  buffer_info.offset = 0;
-  buffer_info.range = kConstantRegisterUniformRange;
-  VkWriteDescriptorSet descriptor_writes[2];
-  auto& vertex_uniform_binding_write = descriptor_writes[0];
+  VkDescriptorBufferInfo transient_buffer_info;
+  transient_buffer_info.buffer = transient_buffer_->gpu_buffer();
+  transient_buffer_info.offset = 0;
+  transient_buffer_info.range = kConstantRegisterUniformRange;
+  VkWriteDescriptorSet transient_descriptor_writes[2];
+  auto& vertex_uniform_binding_write = transient_descriptor_writes[0];
   vertex_uniform_binding_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   vertex_uniform_binding_write.pNext = nullptr;
   vertex_uniform_binding_write.dstSet = transient_descriptor_set_;
@@ -120,8 +144,8 @@ BufferCache::BufferCache(RegisterFile* register_file,
   vertex_uniform_binding_write.descriptorCount = 1;
   vertex_uniform_binding_write.descriptorType =
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-  vertex_uniform_binding_write.pBufferInfo = &buffer_info;
-  auto& fragment_uniform_binding_write = descriptor_writes[1];
+  vertex_uniform_binding_write.pBufferInfo = &transient_buffer_info;
+  auto& fragment_uniform_binding_write = transient_descriptor_writes[1];
   fragment_uniform_binding_write.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
   fragment_uniform_binding_write.pNext = nullptr;
   fragment_uniform_binding_write.dstSet = transient_descriptor_set_;
@@ -130,14 +154,44 @@ BufferCache::BufferCache(RegisterFile* register_file,
   fragment_uniform_binding_write.descriptorCount = 1;
   fragment_uniform_binding_write.descriptorType =
       VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC;
-  fragment_uniform_binding_write.pBufferInfo = &buffer_info;
-  vkUpdateDescriptorSets(device_, 2, descriptor_writes, 0, nullptr);
+  fragment_uniform_binding_write.pBufferInfo = &transient_buffer_info;
+  vkUpdateDescriptorSets(device_, 2, transient_descriptor_writes, 0, nullptr);
+
+  VkDescriptorSetAllocateInfo vertex_fetch_set_alloc_info;
+  vertex_fetch_set_alloc_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+  vertex_fetch_set_alloc_info.pNext = nullptr;
+  vertex_fetch_set_alloc_info.descriptorPool = descriptor_pool_;
+  vertex_fetch_set_alloc_info.descriptorSetCount = 1;
+  vertex_fetch_set_alloc_info.pSetLayouts = &vertex_fetch_descriptor_set_layout_;
+  err = vkAllocateDescriptorSets(device_, &vertex_fetch_set_alloc_info,
+                                 &vertex_fetch_descriptor_set_);
+  CheckResult(err, "vkAllocateDescriptorSets");
+
+  VkDescriptorBufferInfo vertex_fetch_buffer_info[32];
+  for (size_t i = 0; i < 32; ++i) {
+    vertex_fetch_buffer_info[i].buffer = transient_buffer_->gpu_buffer();
+    vertex_fetch_buffer_info[i].offset = 0;
+    vertex_fetch_buffer_info[i].range = VK_WHOLE_SIZE;
+  }
+  VkWriteDescriptorSet vertex_fetch_descriptor_writes;
+  vertex_fetch_descriptor_writes.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET;
+  vertex_fetch_descriptor_writes.pNext = nullptr;
+  vertex_fetch_descriptor_writes.dstSet = vertex_fetch_descriptor_set_;
+  vertex_fetch_descriptor_writes.dstBinding = 0;
+  vertex_fetch_descriptor_writes.dstArrayElement = 0;
+  vertex_fetch_descriptor_writes.descriptorCount = 32;
+  vertex_fetch_descriptor_writes.descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER_DYNAMIC;
+  vertex_fetch_descriptor_writes.pBufferInfo = vertex_fetch_buffer_info;
+  vkUpdateDescriptorSets(device_, 1, &vertex_fetch_descriptor_writes, 0, nullptr);
 }
 
 BufferCache::~BufferCache() {
   vkFreeDescriptorSets(device_, descriptor_pool_, 1,
                        &transient_descriptor_set_);
-  vkDestroyDescriptorSetLayout(device_, descriptor_set_layout_, nullptr);
+  vkDestroyDescriptorSetLayout(device_, transient_descriptor_set_layout_, nullptr);
+  vkFreeDescriptorSets(device_, descriptor_pool_, 1,
+                       &vertex_fetch_descriptor_set_);
+  vkDestroyDescriptorSetLayout(device_, vertex_fetch_descriptor_set_layout_, nullptr);
   vkDestroyDescriptorPool(device_, descriptor_pool_, nullptr);
   transient_buffer_->Shutdown();
 

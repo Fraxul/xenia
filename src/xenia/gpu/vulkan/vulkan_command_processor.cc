@@ -79,7 +79,8 @@ bool VulkanCommandProcessor::SetupContext() {
                                                   &trace_writer_, device_);
   pipeline_cache_ = std::make_unique<PipelineCache>(
       register_file_, device_, buffer_cache_->constant_descriptor_set_layout(),
-      texture_cache_->texture_descriptor_set_layout());
+      texture_cache_->texture_descriptor_set_layout(),
+      buffer_cache_->vertex_fetch_descriptor_set_layout());
   render_cache_ = std::make_unique<RenderCache>(register_file_, device_);
 
   VkSemaphoreCreateInfo info;
@@ -710,8 +711,7 @@ bool VulkanCommandProcessor::PopulateVertexBuffers(
   }
 
   assert_true(vertex_bindings.size() <= 32);
-  VkBuffer all_buffers[32];
-  VkDeviceSize all_buffer_offsets[32];
+  uint32_t vertex_buffer_offsets[32] = {0};
   uint32_t buffer_index = 0;
 
   for (const auto& vertex_binding : vertex_bindings) {
@@ -753,14 +753,18 @@ bool VulkanCommandProcessor::PopulateVertexBuffers(
     }
 
     // Stash the buffer reference for our bulk bind at the end.
-    all_buffers[buffer_index] = buffer_ref.first;
-    all_buffer_offsets[buffer_index] = buffer_ref.second;
+    vertex_buffer_offsets[buffer_index] = static_cast<uint32_t>(buffer_ref.second);
     ++buffer_index;
   }
 
-  // Bind buffers.
-  vkCmdBindVertexBuffers(command_buffer, 0, buffer_index, all_buffers,
-                         all_buffer_offsets);
+  auto vertex_fetch_descriptor_set = buffer_cache_->vertex_fetch_descriptor_set();
+  auto pipeline_layout = pipeline_cache_->pipeline_layout();
+  vkCmdBindDescriptorSets(
+    command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 2, 1,
+    &vertex_fetch_descriptor_set,
+    static_cast<uint32_t>(xe::countof(vertex_buffer_offsets)),
+    vertex_buffer_offsets);
+
 
   return true;
 }

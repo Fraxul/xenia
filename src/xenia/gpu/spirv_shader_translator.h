@@ -161,8 +161,8 @@ class SpirvShaderTranslator : public ShaderTranslator {
   // SPIR-V IDs that are part of the in/out interface.
   std::vector<spv::Id> interface_ids_;
 
-  // Map of {binding -> {offset -> spv input}}
-  std::map<uint32_t, std::map<uint32_t, spv::Id>> vertex_binding_map_;
+  // Map of {binding -> spv input structure}
+  std::map<uint32_t, spv::Id> vertex_binding_map_;
 
   struct CFBlock {
     spv::Block* block = nullptr;

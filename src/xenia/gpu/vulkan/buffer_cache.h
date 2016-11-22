@@ -32,17 +32,26 @@ class BufferCache {
               size_t capacity);
   ~BufferCache();
 
-  // Descriptor set containing the dynamic uniform buffer used for constant
-  // uploads. Used in conjunction with a dynamic offset returned by
-  // UploadConstantRegisters.
-  // The set contains two bindings:
-  //   binding = 0: for use in vertex shaders
-  //   binding = 1: for use in fragment shaders
+  // Descriptor set containing the buffer used for uniform and vertex data
+  // uploads. Used in conjunction with dynamic offsets returned by
+  // UploadConstantRegisters and UploadVertexBuffer.
+  // The set contains 2 bindings:
+  //   binding = 0: uniform data for use in vertex shaders
+  //   binding = 1: uniform data for use in fragment shaders
   VkDescriptorSet constant_descriptor_set() const {
     return transient_descriptor_set_;
   }
+  //   binding = 2: storage data for vertex fetch in vertex shaders
+  VkDescriptorSet vertex_fetch_descriptor_set() const {
+    return vertex_fetch_descriptor_set_;
+  }
+
   VkDescriptorSetLayout constant_descriptor_set_layout() const {
-    return descriptor_set_layout_;
+    return transient_descriptor_set_layout_;
+  }
+
+  VkDescriptorSetLayout vertex_fetch_descriptor_set_layout() const {
+    return vertex_fetch_descriptor_set_layout_;
   }
 
   // Uploads the constants specified in the register maps to the transient
@@ -111,8 +120,10 @@ class BufferCache {
   std::unordered_map<uint64_t, VkDeviceSize> transient_cache_;
 
   VkDescriptorPool descriptor_pool_ = nullptr;
-  VkDescriptorSetLayout descriptor_set_layout_ = nullptr;
+  VkDescriptorSetLayout transient_descriptor_set_layout_ = nullptr;
   VkDescriptorSet transient_descriptor_set_ = nullptr;
+  VkDescriptorSetLayout vertex_fetch_descriptor_set_layout_ = nullptr;
+  VkDescriptorSet vertex_fetch_descriptor_set_ = nullptr;
 };
 
 }  // namespace vulkan

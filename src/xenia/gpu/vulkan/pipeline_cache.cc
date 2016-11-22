@@ -36,7 +36,8 @@ using xe::ui::vulkan::CheckResult;
 PipelineCache::PipelineCache(
     RegisterFile* register_file, ui::vulkan::VulkanDevice* device,
     VkDescriptorSetLayout uniform_descriptor_set_layout,
-    VkDescriptorSetLayout texture_descriptor_set_layout)
+    VkDescriptorSetLayout texture_descriptor_set_layout,
+    VkDescriptorSetLayout vertex_fetch_descriptor_set_layout)
     : register_file_(register_file), device_(*device) {
   // Initialize the shared driver pipeline cache.
   // We'll likely want to serialize this and reuse it, if that proves to be
@@ -59,6 +60,8 @@ PipelineCache::PipelineCache(
       uniform_descriptor_set_layout,
       // All texture bindings.
       texture_descriptor_set_layout,
+      // Vertex fetch buffers.
+      vertex_fetch_descriptor_set_layout
   };
 
   // Push constants used for draw parameters.
@@ -877,126 +880,10 @@ PipelineCache::UpdateStatus PipelineCache::UpdateVertexInputState(
   state_info.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
   state_info.pNext = nullptr;
   state_info.flags = 0;
-
-  auto& vertex_binding_descrs = update_vertex_input_state_binding_descrs_;
-  auto& vertex_attrib_descrs = update_vertex_input_state_attrib_descrs_;
-  uint32_t vertex_binding_count = 0;
-  uint32_t vertex_attrib_count = 0;
-  for (const auto& vertex_binding : vertex_shader->vertex_bindings()) {
-    assert_true(vertex_binding_count < xe::countof(vertex_binding_descrs));
-    auto& vertex_binding_descr = vertex_binding_descrs[vertex_binding_count++];
-    vertex_binding_descr.binding = vertex_binding.binding_index;
-    vertex_binding_descr.stride = vertex_binding.stride_words * 4;
-    vertex_binding_descr.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
-
-    for (const auto& attrib : vertex_binding.attributes) {
-      assert_true(vertex_attrib_count < xe::countof(vertex_attrib_descrs));
-      auto& vertex_attrib_descr = vertex_attrib_descrs[vertex_attrib_count++];
-      vertex_attrib_descr.location = attrib.attrib_index;
-      vertex_attrib_descr.binding = vertex_binding.binding_index;
-      vertex_attrib_descr.format = VK_FORMAT_UNDEFINED;
-      vertex_attrib_descr.offset = attrib.fetch_instr.attributes.offset * 4;
-
-      bool is_signed = attrib.fetch_instr.attributes.is_signed;
-      bool is_integer = attrib.fetch_instr.attributes.is_integer;
-      switch (attrib.fetch_instr.attributes.data_format) {
-        case VertexFormat::k_8_8_8_8:
-          if (is_integer) {
-            vertex_attrib_descr.format =
-                is_signed ? VK_FORMAT_R8G8B8A8_SINT : VK_FORMAT_R8G8B8A8_UINT;
-          } else {
-            vertex_attrib_descr.format =
-                is_signed ? VK_FORMAT_R8G8B8A8_SNORM : VK_FORMAT_R8G8B8A8_UNORM;
-          }
-          break;
-        case VertexFormat::k_2_10_10_10:
-          vertex_attrib_descr.format = is_signed
-                                           ? VK_FORMAT_A2B10G10R10_SNORM_PACK32
-                                           : VK_FORMAT_A2B10G10R10_UNORM_PACK32;
-          break;
-        case VertexFormat::k_10_11_11:
-          // Converted in-shader.
-          vertex_attrib_descr.format =
-              is_signed ? VK_FORMAT_R32_SINT : VK_FORMAT_R32_UINT;
-          break;
-        case VertexFormat::k_11_11_10:
-          // Converted in-shader.
-          vertex_attrib_descr.format =
-              is_signed ? VK_FORMAT_R32_SINT : VK_FORMAT_R32_UINT;
-          break;
-        case VertexFormat::k_16_16:
-          if (is_integer) {
-            vertex_attrib_descr.format =
-                is_signed ? VK_FORMAT_R16G16_SINT : VK_FORMAT_R16G16_UINT;
-          } else {
-            vertex_attrib_descr.format =
-                is_signed ? VK_FORMAT_R16G16_SNORM : VK_FORMAT_R16G16_UNORM;
-          }
-          break;
-        case VertexFormat::k_16_16_FLOAT:
-          // assert_true(is_signed);
-          vertex_attrib_descr.format = VK_FORMAT_R16G16_SFLOAT;
-          break;
-        case VertexFormat::k_16_16_16_16:
-          if (is_integer) {
-            vertex_attrib_descr.format = is_signed
-                                             ? VK_FORMAT_R16G16B16A16_SINT
-                                             : VK_FORMAT_R16G16B16A16_UINT;
-          } else {
-            vertex_attrib_descr.format = is_signed
-                                             ? VK_FORMAT_R16G16B16A16_SNORM
-                                             : VK_FORMAT_R16G16B16A16_UNORM;
-          }
-          break;
-        case VertexFormat::k_16_16_16_16_FLOAT:
-          // assert_true(is_signed);
-          vertex_attrib_descr.format = VK_FORMAT_R16G16B16A16_SFLOAT;
-          break;
-        case VertexFormat::k_32:
-          // FIXME: Is this a NORM format?
-          assert_true(is_integer);
-          vertex_attrib_descr.format =
-              is_signed ? VK_FORMAT_R32_SINT : VK_FORMAT_R32_UINT;
-          break;
-        case VertexFormat::k_32_32:
-          // FIXME: Is this a NORM format?
-          assert_true(is_integer);
-          vertex_attrib_descr.format =
-              is_signed ? VK_FORMAT_R32G32_SINT : VK_FORMAT_R32G32_UINT;
-          break;
-        case VertexFormat::k_32_32_32_32:
-          // FIXME: Is this a NORM format?
-          assert_true(is_integer);
-          vertex_attrib_descr.format =
-              is_signed ? VK_FORMAT_R32G32B32A32_SINT : VK_FORMAT_R32_UINT;
-          break;
-        case VertexFormat::k_32_FLOAT:
-          // assert_true(is_signed);
-          vertex_attrib_descr.format = VK_FORMAT_R32_SFLOAT;
-          break;
-        case VertexFormat::k_32_32_FLOAT:
-          // assert_true(is_signed);
-          vertex_attrib_descr.format = VK_FORMAT_R32G32_SFLOAT;
-          break;
-        case VertexFormat::k_32_32_32_FLOAT:
-          // assert_true(is_signed);
-          vertex_attrib_descr.format = VK_FORMAT_R32G32B32_SFLOAT;
-          break;
-        case VertexFormat::k_32_32_32_32_FLOAT:
-          // assert_true(is_signed);
-          vertex_attrib_descr.format = VK_FORMAT_R32G32B32A32_SFLOAT;
-          break;
-        default:
-          assert_unhandled_case(attrib.fetch_instr.attributes.data_format);
-          break;
-      }
-    }
-  }
-
-  state_info.vertexBindingDescriptionCount = vertex_binding_count;
-  state_info.pVertexBindingDescriptions = vertex_binding_descrs;
-  state_info.vertexAttributeDescriptionCount = vertex_attrib_count;
-  state_info.pVertexAttributeDescriptions = vertex_attrib_descrs;
+  state_info.vertexBindingDescriptionCount = 0;
+  state_info.pVertexBindingDescriptions = nullptr;
+  state_info.vertexAttributeDescriptionCount = 0;
+  state_info.pVertexAttributeDescriptions = nullptr;
 
   return UpdateStatus::kMismatch;
 }
