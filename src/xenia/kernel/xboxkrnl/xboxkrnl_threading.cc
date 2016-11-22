@@ -284,7 +284,7 @@ SHIM_CALL KeSetBasePriorityThread_shim(PPCContext* ppc_context,
   uint32_t thread_ptr = SHIM_GET_ARG_32(0);
   uint32_t increment = SHIM_GET_ARG_32(1);
 
-  XELOGD("KeSetBasePriorityThread(%.8X, %.8X)", thread_ptr, increment);
+  //XELOGD("KeSetBasePriorityThread(%.8X, %.8X)", thread_ptr, increment);
 
   int32_t prev_priority = 0;
   auto thread = XObject::GetNativeObject<XThread>(kernel_state,
@@ -448,7 +448,7 @@ dword_result_t KeSetEvent(pointer_t<X_KEVENT> event_ptr, dword_t increment,
   return ev->Set(increment, !!wait);
 }
 DECLARE_XBOXKRNL_EXPORT(KeSetEvent,
-                        ExportTag::kImplemented | ExportTag::kThreading);
+                        ExportTag::kImplemented | ExportTag::kThreading | ExportTag::kHighFrequency);
 
 dword_result_t KePulseEvent(pointer_t<X_KEVENT> event_ptr, dword_t increment,
                             dword_t wait) {
@@ -460,7 +460,7 @@ dword_result_t KePulseEvent(pointer_t<X_KEVENT> event_ptr, dword_t increment,
 
   return ev->Pulse(increment, !!wait);
 }
-DECLARE_XBOXKRNL_EXPORT(KePulseEvent, ExportTag::kImplemented);
+DECLARE_XBOXKRNL_EXPORT(KePulseEvent, ExportTag::kImplemented | ExportTag::kHighFrequency);
 
 dword_result_t KeResetEvent(pointer_t<X_KEVENT> event_ptr) {
   auto ev = XObject::GetNativeObject<XEvent>(kernel_state(), event_ptr);
@@ -472,7 +472,7 @@ dword_result_t KeResetEvent(pointer_t<X_KEVENT> event_ptr) {
   return ev->Reset();
 }
 DECLARE_XBOXKRNL_EXPORT(KeResetEvent,
-                        ExportTag::kImplemented | ExportTag::kThreading);
+                        ExportTag::kImplemented | ExportTag::kThreading | ExportTag::kHighFrequency);
 
 dword_result_t NtCreateEvent(lpdword_t handle_ptr,
                              pointer_t<X_OBJECT_ATTRIBUTES> obj_attributes_ptr,
@@ -861,7 +861,8 @@ dword_result_t NtWaitForSingleObjectEx(dword_t object_handle, dword_t wait_mode,
 }
 DECLARE_XBOXKRNL_EXPORT(NtWaitForSingleObjectEx, ExportTag::kImplemented |
                                                      ExportTag::kThreading |
-                                                     ExportTag::kBlocking);
+                                                     ExportTag::kBlocking |
+                                                     ExportTag::kHighFrequency);
 
 dword_result_t KeWaitForMultipleObjects(dword_t count, lpdword_t objects_ptr,
                                         dword_t wait_type, dword_t wait_reason,

@@ -35,8 +35,8 @@ SHIM_CALL XAudioGetVoiceCategoryVolumeChangeMask_shim(
   uint32_t driver_ptr = SHIM_GET_ARG_32(0);
   uint32_t out_ptr = SHIM_GET_ARG_32(1);
 
-  XELOGD("XAudioGetVoiceCategoryVolumeChangeMask(%.8X, %.8X)", driver_ptr,
-         out_ptr);
+  //XELOGD("XAudioGetVoiceCategoryVolumeChangeMask(%.8X, %.8X)", driver_ptr,
+  //       out_ptr);
 
   assert_true((driver_ptr & 0xFFFF0000) == 0x41550000);
 
@@ -113,7 +113,7 @@ SHIM_CALL XAudioSubmitRenderDriverFrame_shim(PPCContext* ppc_context,
   uint32_t driver_ptr = SHIM_GET_ARG_32(0);
   uint32_t samples_ptr = SHIM_GET_ARG_32(1);
 
-  XELOGD("XAudioSubmitRenderDriverFrame(%.8X, %.8X)", driver_ptr, samples_ptr);
+  //XELOGD("XAudioSubmitRenderDriverFrame(%.8X, %.8X)", driver_ptr, samples_ptr);
 
   assert_true((driver_ptr & 0xFFFF0000) == 0x41550000);
 

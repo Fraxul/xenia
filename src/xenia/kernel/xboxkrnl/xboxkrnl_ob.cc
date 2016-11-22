@@ -84,8 +84,8 @@ SHIM_CALL ObReferenceObjectByHandle_shim(PPCContext* ppc_context,
   uint32_t object_type_ptr = SHIM_GET_ARG_32(1);
   uint32_t out_object_ptr = SHIM_GET_ARG_32(2);
 
-  XELOGD("ObReferenceObjectByHandle(%.8X, %.8X, %.8X)", handle, object_type_ptr,
-         out_object_ptr);
+  //XELOGD("ObReferenceObjectByHandle(%.8X, %.8X, %.8X)", handle, object_type_ptr,
+  //       out_object_ptr);
 
   X_STATUS result = X_STATUS_SUCCESS;
 
@@ -152,7 +152,7 @@ SHIM_CALL ObDereferenceObject_shim(PPCContext* ppc_context,
                                    KernelState* kernel_state) {
   uint32_t native_ptr = SHIM_GET_ARG_32(0);
 
-  XELOGD("ObDereferenceObject(%.8X)", native_ptr);
+  //XELOGD("ObDereferenceObject(%.8X)", native_ptr);
 
   // Check if a dummy value from ObReferenceObjectByHandle.
   if (native_ptr == 0xDEADF00D) {
