@@ -409,7 +409,11 @@ DECLARE_XBOXKRNL_EXPORT(RtlTryEnterCriticalSection,
                         ExportTag::kImplemented | ExportTag::kHighFrequency);
 
 void RtlLeaveCriticalSection(pointer_t<X_RTL_CRITICAL_SECTION> cs) {
-  assert_true(cs->owning_thread == XThread::GetCurrentThread()->guest_object());
+  if (cs->owning_thread != XThread::GetCurrentThread()->guest_object()) {
+    XELOGE("RtlLeaveCriticalSection(%.8X) owning thread ID does not match current thread\n", cs);
+    return;
+  }
+  //assert_true(cs->owning_thread == XThread::GetCurrentThread()->guest_object());
 
   // Drop recursion count - if it isn't zero we still have the lock.
   if (--cs->recursion_count != 0) {
