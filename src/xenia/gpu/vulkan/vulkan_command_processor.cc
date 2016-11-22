@@ -1054,7 +1054,8 @@ bool VulkanCommandProcessor::IssueCopy() {
   uint32_t copy_color_clear_low = regs[XE_GPU_REG_RB_COLOR_CLEAR_LOW].u32;
   assert_true(copy_color_clear == copy_color_clear_low);
 
-  if (color_clear_enabled) {
+  //if (color_clear_enabled) {
+  if (true && copy_src_select <= 3) { // XXX
     // If color clear is enabled, we can only clear a selected color target!
     assert_true(copy_src_select <= 3);
 
