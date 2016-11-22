@@ -13,6 +13,8 @@
 #include <cstring>
 
 #include "xenia/base/filesystem.h"
+#include "xenia/base/logging.h"
+#include "xenia/base/mapped_memory.h"
 #include "xenia/base/math.h"
 #include "xenia/base/memory.h"
 #include "xenia/base/string.h"
@@ -25,9 +27,24 @@ using namespace ucode;
 Shader::Shader(ShaderType shader_type, uint64_t ucode_data_hash,
                const uint32_t* ucode_dwords, size_t ucode_dword_count)
     : shader_type_(shader_type), ucode_data_hash_(ucode_data_hash) {
-  // We keep ucode data in host native format so it's easier to work with.
-  ucode_data_.resize(ucode_dword_count);
-  xe::copy_and_swap(ucode_data_.data(), ucode_dwords, ucode_dword_count);
+
+  char bin_file_name[kMaxPath];
+  std::snprintf(bin_file_name, xe::countof(bin_file_name),
+    "shader_%.16" PRIX64 ".bin.%s",
+    ucode_data_hash_,
+    shader_type_ == ShaderType::kVertex ? "vert" : "frag");
+  auto map = xe::MappedMemory::Open(xe::to_wstring(bin_file_name), MappedMemory::Mode::kRead);
+  if (map) {
+    XELOGGPU("Found runtime replacement shader %s on disk", bin_file_name);
+    const size_t offset = 0x48;
+    ucode_data_.resize((map->size() - offset) / 4);
+    xe::copy_and_swap(ucode_data_.data(), reinterpret_cast<const uint32_t*>(reinterpret_cast<const uint8_t*>(map->data()) + offset), ucode_data_.size());
+  } else {
+    XELOGGPU("No runtime replacement shader %s on disk", bin_file_name);
+    // We keep ucode data in host native format so it's easier to work with.
+    ucode_data_.resize(ucode_dword_count);
+    xe::copy_and_swap(ucode_data_.data(), ucode_dwords, ucode_dword_count);
+  }
 }
 
 Shader::~Shader() = default;
@@ -79,7 +96,11 @@ std::pair<std::string, std::string> Shader::Dump(const std::string& base_path,
                 shader_type_ == ShaderType::kVertex ? "vert" : "frag");
   f = fopen(bin_file_name, "wb");
   if (f) {
-    fwrite(ucode_data_.data(), 4, ucode_data_.size(), f);
+    // Swap back to guest-native format for dump
+    std::vector<uint32_t> guest_ucode_data;
+    guest_ucode_data.resize(ucode_data_.size());
+    xe::copy_and_swap(guest_ucode_data.data(), ucode_data_.data(), ucode_data_.size());
+    fwrite(guest_ucode_data.data(), 4, guest_ucode_data.size(), f);
     fclose(f);
   }
 
