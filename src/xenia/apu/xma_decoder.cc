@@ -21,6 +21,9 @@
 #include "xenia/cpu/thread_state.h"
 #include "xenia/kernel/xthread.h"
 
+#undef XELOGAPU
+#define XELOGAPU(...)
+
 extern "C" {
 #include "third_party/libav/libavutil/log.h"
 }  // extern "C"

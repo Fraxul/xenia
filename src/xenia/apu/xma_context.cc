@@ -19,6 +19,9 @@
 #include "xenia/base/profiling.h"
 #include "xenia/base/ring_buffer.h"
 
+#undef XELOGAPU
+#define XELOGAPU(...)
+
 extern "C" {
 #include "third_party/libav/libavcodec/avcodec.h"
 #include "third_party/libav/libavcodec/xma2dec.h"
