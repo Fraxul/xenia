@@ -32,6 +32,9 @@ DEFINE_bool(ignore_thread_priorities, true,
             "Ignores game-specified thread priorities.");
 DEFINE_bool(ignore_thread_affinities, true,
             "Ignores game-specified thread affinities.");
+DEFINE_int32(
+    limit_guest_core_count, 0,
+    "Lock guest threads to a limited number of CPU cores. 0 means no limit.");
 
 namespace xe {
 namespace kernel {
@@ -398,9 +401,28 @@ X_STATUS XThread::Create() {
     return X_STATUS_NO_MEMORY;
   }
 
-  if (!FLAGS_ignore_thread_affinities) {
-    thread_->set_affinity_mask(proc_mask);
+  uint64_t affinity_mask = proc_mask;
+  if (FLAGS_ignore_thread_affinities) {
+    affinity_mask = 0xffffffffffffffffULL;
   }
+
+  if (guest_thread_ && FLAGS_limit_guest_core_count) {
+    affinity_mask = 0;
+    // Pick every other core so that we're more likely to get physical cores
+    // instead of hyperthreading logical core pairs (which are usually
+    // sequential).
+    // TODO(@sabretooth): use
+    // GetLogicalProcessorInformationEx(RelationProcessorCore, ...) to find the
+    // actual physical core mapping.
+    // TODO(@sabretooth): this steps on any game-provided affinity mask if
+    // FLAGS_ignore_thread_affinities is false.
+    for (uint64_t i = 0;
+         i < std::min<uint64_t>(FLAGS_limit_guest_core_count, 32); ++i) {
+      affinity_mask |= 1ULL << (i * 2);
+    }
+  }
+
+  thread_->set_affinity_mask(affinity_mask);
 
   // Set the thread name based on host ID (for easier debugging).
   if (thread_name_.empty()) {
