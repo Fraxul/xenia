@@ -1012,11 +1012,16 @@ bool VulkanCommandProcessor::IssueCopy() {
         static_cast<Endian>(copy_regs->copy_dest_info.copy_dest_endian.value());
   }
 
+  // Destination height needs to be large enough to cover the copy height
+  // plus y-offset
+  uint32_t dest_height =
+      std::max<uint32_t>(dest_max_y, copy_dest_height + dest_min_y);
+
   // Demand a resolve texture from the texture cache.
   TextureInfo texture_info;
   TextureInfo::PrepareResolve(copy_dest_base, copy_dest_format, resolve_endian,
-                              dest_logical_width,
-                              std::max(1u, dest_logical_height), &texture_info);
+                              dest_logical_width, std::max(1u, dest_height),
+                              &texture_info);
 
   auto texture = texture_cache_->DemandResolveTexture(texture_info);
   if (!texture) {
