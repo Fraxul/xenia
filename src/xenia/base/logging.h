@@ -47,6 +47,11 @@ void FatalError(const char* fmt, ...);
 // Logs a fatal error and aborts the program.
 void FatalError(const std::string& str);
 
+// Returns true if log lines of the given level will be logged, or false if
+// they'll be discarded. Use to gate potentially expensive computation of log
+// data that might not go anywhere.
+bool IsLogLevelActive(LogLevel level);
+
 #if XE_OPTION_ENABLE_LOGGING
 #define XELOGCORE(level, prefix, fmt, ...) \
   xe::LogLineFormat(level, prefix, fmt, ##__VA_ARGS__)

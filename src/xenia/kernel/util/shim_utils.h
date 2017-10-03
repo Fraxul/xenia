@@ -443,6 +443,12 @@ StringBuffer* thread_local_string_buffer();
 
 template <typename Tuple>
 void PrintKernelCall(cpu::Export* export_entry, const Tuple& params) {
+  // Try and save the string formatting work if logging isn't enabled.
+  if (!xe::IsLogLevelActive(
+          (export_entry->tags & xe::cpu::ExportTag::kImportant)
+              ? xe::LogLevel::LOG_LEVEL_INFO
+              : xe::LogLevel::LOG_LEVEL_DEBUG))
+    return;
   auto& string_buffer = *thread_local_string_buffer();
   string_buffer.Reset();
   string_buffer.Append(export_entry->name);

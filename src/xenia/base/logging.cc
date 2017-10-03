@@ -331,4 +331,8 @@ void FatalError(const char* fmt, ...) {
 
 void FatalError(const std::string& str) { FatalError(str.c_str()); }
 
+bool IsLogLevelActive(LogLevel level) {
+  return (static_cast<int32_t>(level) <= FLAGS_log_level);
+}
+
 }  // namespace xe
