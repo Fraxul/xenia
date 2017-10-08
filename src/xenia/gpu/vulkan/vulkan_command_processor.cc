@@ -717,24 +717,57 @@ bool VulkanCommandProcessor::PopulateConstants(VkCommandBuffer command_buffer,
   xe::gpu::Shader::ConstantRegisterMap dummy_map;
   std::memset(&dummy_map, 0, sizeof(dummy_map));
 
-  // Upload the constants the shaders require.
-  // These are optional, and if none are defined 0 will be returned.
-  auto constant_offsets = buffer_cache_->UploadConstantRegisters(
-      current_setup_buffer_, vertex_shader->constant_register_map(),
-      pixel_shader ? pixel_shader->constant_register_map() : dummy_map,
-      current_batch_fence_);
-  if (constant_offsets.first == VK_WHOLE_SIZE ||
-      constant_offsets.second == VK_WHOLE_SIZE) {
-    // Shader wants constants but we couldn't upload them.
-    return false;
+  VkDeviceSize vertex_constant_offset = VK_WHOLE_SIZE;
+  VkDeviceSize pixel_constant_offset = VK_WHOLE_SIZE;
+
+  if (dirty_float_constants_ || dirty_bool_constants_ ||
+      dirty_loop_constants_) {
+    constant_cache_vertex_shader_ = nullptr;
+    constant_cache_vertex_offset_ = VK_WHOLE_SIZE;
+    constant_cache_pixel_shader_ = nullptr;
+    constant_cache_pixel_offset_ = VK_WHOLE_SIZE;
+  }
+
+  if (constant_cache_vertex_shader_ == vertex_shader &&
+      constant_cache_vertex_offset_ != VK_WHOLE_SIZE) {
+    vertex_constant_offset = constant_cache_vertex_offset_;
+  }
+
+  if (constant_cache_pixel_shader_ == pixel_shader &&
+      constant_cache_pixel_offset_ != VK_WHOLE_SIZE) {
+    pixel_constant_offset = constant_cache_pixel_offset_;
+  }
+
+  if (vertex_constant_offset == VK_WHOLE_SIZE ||
+      pixel_constant_offset == VK_WHOLE_SIZE) {
+    // Upload the constants the shaders require.
+    // These are optional, and if none are defined 0 will be returned.
+    auto constant_offsets = buffer_cache_->UploadConstantRegisters(
+        current_setup_buffer_, vertex_shader->constant_register_map(),
+        pixel_shader ? pixel_shader->constant_register_map() : dummy_map,
+        current_batch_fence_);
+    if (constant_offsets.first == VK_WHOLE_SIZE ||
+        constant_offsets.second == VK_WHOLE_SIZE) {
+      // Shader wants constants but we couldn't upload them.
+      return false;
+    }
+    vertex_constant_offset = constant_cache_vertex_offset_ =
+        constant_offsets.first;
+    pixel_constant_offset = constant_cache_pixel_offset_ =
+        constant_offsets.second;
+    constant_cache_vertex_shader_ = vertex_shader;
+    constant_cache_pixel_shader_ = pixel_shader;
+    dirty_float_constants_ = 0;
+    dirty_bool_constants_ = 0;
+    dirty_loop_constants_ = 0;
   }
 
   // Configure constant uniform access to point at our offsets.
   auto constant_descriptor_set = buffer_cache_->constant_descriptor_set();
   auto pipeline_layout = pipeline_cache_->pipeline_layout();
   uint32_t set_constant_offsets[2] = {
-      static_cast<uint32_t>(constant_offsets.first),
-      static_cast<uint32_t>(constant_offsets.second)};
+      static_cast<uint32_t>(vertex_constant_offset),
+      static_cast<uint32_t>(pixel_constant_offset)};
   vkCmdBindDescriptorSets(
       command_buffer, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline_layout, 0, 1,
       &constant_descriptor_set,

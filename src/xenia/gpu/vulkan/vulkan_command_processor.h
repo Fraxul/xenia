@@ -105,6 +105,13 @@ class VulkanCommandProcessor : public CommandProcessor {
   uint8_t dirty_bool_constants_ = 0;
   uint32_t dirty_loop_constants_ = 0;
 
+  // Tracking data for vertex/fragment shader constant cache to avoid redundant
+  // uploads
+  VulkanShader* constant_cache_vertex_shader_ = nullptr;
+  VulkanShader* constant_cache_pixel_shader_ = nullptr;
+  VkDeviceSize constant_cache_vertex_offset_ = VK_WHOLE_SIZE;
+  VkDeviceSize constant_cache_pixel_offset_ = VK_WHOLE_SIZE;
+
   uint32_t coher_base_vc_ = 0;
   uint32_t coher_size_vc_ = 0;
 
