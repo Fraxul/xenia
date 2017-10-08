@@ -693,6 +693,8 @@ VkDeviceSize BufferCache::TryAllocateTransientData(VkDeviceSize length,
 
 VkDeviceSize BufferCache::FindCachedTransientData(uint32_t guest_address,
                                                   uint32_t guest_length) {
+  if (!FLAGS_vulkan_transient_cache) return VK_WHOLE_SIZE;
+
   if (transient_cache_.empty()) {
     // Short-circuit exit.
     return VK_WHOLE_SIZE;
@@ -717,6 +719,8 @@ VkDeviceSize BufferCache::FindCachedTransientData(uint32_t guest_address,
 void BufferCache::CacheTransientData(uint32_t guest_address,
                                      uint32_t guest_length,
                                      VkDeviceSize offset) {
+  if (!FLAGS_vulkan_transient_cache) return;
+
   transient_cache_[guest_address] = {guest_length, offset};
 
   // Erase any entries contained within

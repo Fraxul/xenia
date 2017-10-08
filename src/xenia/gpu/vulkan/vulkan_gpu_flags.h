@@ -17,5 +17,6 @@
 DECLARE_bool(vulkan_renderdoc_capture_all);
 DECLARE_bool(vulkan_native_msaa);
 DECLARE_bool(vulkan_dump_disasm);
+DECLARE_bool(vulkan_transient_cache);
 
 #endif  // XENIA_GPU_VULKAN_VULKAN_GPU_FLAGS_H_

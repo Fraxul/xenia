@@ -14,3 +14,5 @@ DEFINE_bool(vulkan_renderdoc_capture_all, false,
 DEFINE_bool(vulkan_native_msaa, false, "Use native MSAA");
 DEFINE_bool(vulkan_dump_disasm, false,
             "Dump shader disassembly. NVIDIA only supported.");
+DEFINE_bool(vulkan_transient_cache, true,
+            "Enable or disable transient data caching. (default enabled)");
