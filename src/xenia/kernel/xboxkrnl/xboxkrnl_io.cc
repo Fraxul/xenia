@@ -239,13 +239,10 @@ DECLARE_XBOXKRNL_EXPORT(NtReadFile,
                         ExportTag::kImplemented | ExportTag::kHighFrequency);
 
 dword_result_t NtWriteFile(dword_t file_handle, dword_t event_handle,
-                           function_t apc_routine, lpvoid_t apc_context,
+                           lpvoid_t apc_routine_ptr, lpvoid_t apc_context,
                            pointer_t<X_IO_STATUS_BLOCK> io_status_block,
                            lpvoid_t buffer, dword_t buffer_length,
                            lpqword_t byte_offset_ptr) {
-  // Async not supported yet.
-  assert_zero(apc_routine);
-
   X_STATUS result = X_STATUS_SUCCESS;
   uint32_t info = 0;
 
@@ -283,6 +280,17 @@ dword_result_t NtWriteFile(dword_t file_handle, dword_t event_handle,
       if (io_status_block) {
         io_status_block->status = X_STATUS_SUCCESS;
         io_status_block->information = info;
+      }
+
+      // Queue the APC callback. It must be delivered via the APC mechanism even
+      // though were are completing immediately.
+      // Low bit probably means do not queue to IO ports.
+      if ((uint32_t)apc_routine_ptr & ~1) {
+        if (apc_context) {
+          auto thread = XThread::GetCurrentThread();
+          thread->EnqueueApc(static_cast<uint32_t>(apc_routine_ptr) & ~1u,
+                             apc_context, io_status_block, 0);
+        }
       }
 
       // Mark that we should signal the event now. We do this after
