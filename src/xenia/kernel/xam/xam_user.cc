@@ -180,6 +180,9 @@ SHIM_CALL XamUserReadProfileSettings_shim(PPCContext* ppc_context,
   for (uint32_t n = 0; n < setting_count; ++n) {
     uint32_t setting_id = setting_ids[n];
     auto setting = user_profile->GetSetting(setting_id);
+    XELOGD("XamUserReadProfileSettings: [%d] id=%.8X found=%d is_set=%d", n,
+           setting_id, setting ? 1 : 0, (setting && setting->is_set) ? 1 : 0);
+
     if (setting) {
       if (setting->is_set) {
         auto extra_size = static_cast<uint32_t>(setting->extra_size());
@@ -230,8 +233,18 @@ SHIM_CALL XamUserReadProfileSettings_shim(PPCContext* ppc_context,
     auto setting = user_profile->GetSetting(setting_id);
 
     std::memset(out_setting, 0, sizeof(X_USER_READ_PROFILE_SETTING));
-    out_setting->from =
-        !setting || !setting->is_set ? 0 : setting->is_title_specific() ? 2 : 1;
+    if (setting == nullptr) {
+      // no data.
+      out_setting->from = 0;
+    } else if (setting->is_set == false ||
+               setting->is_title_specific() == false) {
+      // default value from the system
+      out_setting->from = 1;
+    } else {
+      // title-specific setting that has been written by the title
+      out_setting->from = 2;
+    }
+
     out_setting->user_index = user_index;
     out_setting->setting_id = setting_id;
 
