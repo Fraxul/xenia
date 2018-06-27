@@ -26,8 +26,10 @@ void copy_128_aligned(void* dest, const void* src, size_t count) {
 #if XE_ARCH_AMD64
 void copy_and_swap_16_aligned(void* dest_ptr, const void* src_ptr,
                               size_t count) {
-  assert_zero(reinterpret_cast<uintptr_t>(dest_ptr) & 0xF);
-  assert_zero(reinterpret_cast<uintptr_t>(src_ptr) & 0xF);
+  if ((reinterpret_cast<uintptr_t>(dest_ptr) & 0xF) || (reinterpret_cast<uintptr_t>(src_ptr) & 0xF)) {
+    copy_and_swap_16_unaligned(dest_ptr, src_ptr, count);
+    return;
+  }
 
   auto dest = reinterpret_cast<uint16_t*>(dest_ptr);
   auto src = reinterpret_cast<const uint16_t*>(src_ptr);
