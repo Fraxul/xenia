@@ -1278,7 +1278,8 @@ bool VulkanCommandProcessor::IssueCopy() {
           command_buffer, current_batch_fence_,
           is_color_source ? view->image_view : view->image_view_depth, src_rect,
           view->GetSize(), texture->format, dst_rect,
-          {copy_dest_pitch, copy_dest_height}, texture->framebuffer, viewport,
+          {texture->texture_info.width + 1, texture->texture_info.height + 1},
+          texture->framebuffer, viewport,
           scissor, filter, is_color_source,
           copy_regs->copy_dest_info.copy_dest_swap != 0);
 

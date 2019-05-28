@@ -218,8 +218,8 @@ void Blitter::BlitTexture2D(VkCommandBuffer command_buffer, VkFence fence,
                             VkImageView src_image_view, VkRect2D src_rect,
                             VkExtent2D src_extents, VkFormat dst_image_format,
                             VkRect2D dst_rect, VkExtent2D dst_extents,
-                            VkFramebuffer dst_framebuffer, VkViewport viewport,
-                            VkRect2D scissor, VkFilter filter,
+                            VkFramebuffer dst_framebuffer, VkViewport viewport_unused,
+                            VkRect2D scissor_unused, VkFilter filter,
                             bool color_or_depth, bool swap_channels) {
   // Do we need a full draw, or can we cheap out with a blit command?
   bool full_draw = swap_channels || true;
@@ -242,6 +242,22 @@ void Blitter::BlitTexture2D(VkCommandBuffer command_buffer, VkFence fence,
 
     vkCmdBeginRenderPass(command_buffer, &render_pass_info,
                          VK_SUBPASS_CONTENTS_INLINE);
+
+    // TODO: remove vestigal parameters. We can compute the viewport and scissor
+    // rect using the destination surface extent and target region
+    VkViewport viewport = {
+        0.f, 0.f, float(dst_extents.width), float(dst_extents.height), 0.f, 1.f,
+    };
+
+    VkRect2D scissor = {
+        {dst_rect.offset.x, dst_rect.offset.y},
+        {dst_rect.extent.width, dst_rect.extent.height},
+    };
+
+    scissor.offset.x = dst_rect.offset.x;
+    scissor.offset.y = dst_rect.offset.y;
+    scissor.extent.width = dst_rect.extent.width;
+    scissor.extent.height = dst_rect.extent.height;
 
     vkCmdSetViewport(command_buffer, 0, 1, &viewport);
     vkCmdSetScissor(command_buffer, 0, 1, &scissor);
